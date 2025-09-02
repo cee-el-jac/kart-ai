@@ -40,11 +40,11 @@ const S = {
   container: { maxWidth: 960, margin: "0 auto", padding: "0 16px" },
   header: {
     position: "sticky", top: 0, zIndex: 10, backdropFilter: "blur(6px)", background: "rgba(255,255,255,0.85)",
-    borderBottom: "1px solid #e5e7eb"
+    borderBottom: "1px solid #e5e7eb", padding: "16px 12px", display: "flex", alignItems: "center",
   },
   headerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" },
   headLeft: { display: "flex", alignItems: "center", gap: 12 },
-  logo: { width: 44, height: 44, borderRadius: 12, objectFit: "cover", display: "block", background: "#fff", border: "1px solid #e5e7eb" },
+  logo: { width: 80, height: 80, borderRadius: 12, objectFit: "cover", display: "block", background: "#fff", /*border: "1px solid #e5e7eb"*/ },
   title: { margin: 0, fontSize: 20, fontWeight: 700, lineHeight: 1.1 },
   subtitle: { margin: 0, fontSize: 12, color: "#6b7280" },
   version: { fontSize: 12, color: "#6b7280" },
@@ -69,12 +69,11 @@ function Header() {
         <div style={S.headerRow}>
           <div style={S.headLeft}>
             <img src="/kart-logo.png" alt="KART AI logo" style={S.logo} />
-            <div>
-              <h1 style={S.title}>KART AI</h1>
+            <div style={S.headLeft}>
               <p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p>
             </div>
           </div>
-          <div style={S.version}>v0.3.5 — groceries + gas units</div>
+          
         </div>
       </div>
     </header>
