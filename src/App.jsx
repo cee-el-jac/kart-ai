@@ -1,38 +1,15 @@
+import React, { useMemo, useState, useEffect } from "react";
+import DealList from "./components/DealList.jsx";
+import {
+  toPerKg,
+  toPerLb,
+  toPerL,
+  toPerGal,
+  money
+} from "./utils/conversions";
 
-
-import { useMemo, useState } from "react";
 
 // ---------- constants & converters ----------
-const LB_PER_KG = 2.20462;
-const L_PER_GAL = 3.78541;
-
-function toPerKg(price, unit) {
-  if (unit === "/kg") return price;
-  if (unit === "/lb") return price * LB_PER_KG;     // $/lb -> $/kg
-  if (unit === "/100g") return price * 10;          // $/100g -> $/kg
-  return null;
-}
-function toPerLb(price, unit) {
-  const perKg = toPerKg(price, unit);
-  return perKg == null ? null : perKg / LB_PER_KG;
-}
-
-function toPerL(price, unit) {
-  if (unit === "/L") return price;
-  if (unit === "/gal") return price / L_PER_GAL;    // $/gal -> $/L
-  return null;
-}
-function toPerGal(price, unit) {
-  const perL = toPerL(price, unit);
-  return perL == null ? null : perL * L_PER_GAL;
-}
-
-function money(n) {
-  if (n == null) return "";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "";
-  return `$${v.toFixed(2)}`;
-}
 
 // ---------- simple styles (Tailwind-free) ----------
 const S = {
@@ -228,35 +205,21 @@ function AddDealForm({ onAdd }) {
 }
 
 export default function App() {
-  const [deals, setDeals] = useState(() => [
-    {
-      id: crypto.randomUUID(),
-      type: "grocery",
-      item: "Chicken Breast (boneless, skinless)",
-      store: "No Frills",
-      station: "",
-      location: "Ottawa, ON",
-      price: 3.99,
-      unit: "/lb",
-      normalizedPerKg: 3.99 * LB_PER_KG,
-      normalizedPerL: null,
-      addedAt: Date.now() - 1000 * 60 * 60 * 6,
-    },
-    {
-      id: crypto.randomUUID(),
-      type: "gas",
-      item: "Regular Unleaded",
-      store: "",
-      station: "Shell Alta Vista",
-      location: "Ottawa, ON",
-      price: 1.59,
-      unit: "/L",
-      normalizedPerKg: null,
-      normalizedPerL: 1.59,
-      addedAt: Date.now() - 1000 * 60 * 60 * 2,
-    },
-  ]);
-
+  const [deals, setDeals] = useState(() => {
+    try {
+      const raw = localStorage.getItem("kart-deals");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }); 
+  
+  useEffect(() => {
+    try {
+      localStorage.setItem("kart-deals", JSON.stringify(deals));
+    } catch {}
+  }, [deals]);
+  
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("newest");
   const [typeFilter, setTypeFilter] = useState("all");
