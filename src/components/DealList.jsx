@@ -2,22 +2,23 @@
 import React from "react";
 import DealCard from "./DealCard";
 
-export default function DealList({ deals, onDelete }) {
+export default function DealList({ deals, onDelete, onEdit }) {
   if (!deals.length) {
     return (
-      <div style={{
-        border: "1px dashed #e5e7eb", borderRadius: 12, padding: 20,
-        textAlign: "center", color: "#6b7280", background: "#fafafa", marginBottom: 12
-      }}>
-        No deals yet. Add your first one above!
+      <div style={{ maxWidth: 960, margin: "0 16px 24px" }}>
+        <p style={{ color: "#6b7280", textAlign: "center" }}>
+          No deals yet. Add your first one above!
+        </p>
       </div>
     );
   }
 
   return (
-    <div>
+    <div style={{ maxWidth: 960, margin: "0 16px 24px" }}>
       {deals.map((d) => (
-        <DealCard key={d.id} deal={d} onDelete={onDelete} />
+        <div key={d.id} style={{ marginBottom: 12 }}>
+          <DealCard deal={d} onDelete={onDelete} onEdit={onEdit} />
+        </div>
       ))}
     </div>
   );

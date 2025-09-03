@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useEffect } from "react";
-import DealList from "./components/DealList.jsx";
 import {
   toPerKg,
   toPerLb,
@@ -7,6 +6,8 @@ import {
   toPerGal,
   money
 } from "./utils/conversions";
+
+
 
 
 // ---------- constants & converters ----------
@@ -57,13 +58,13 @@ function Header() {
   );
 }
 
-function DealCard({ deal, onDelete }) {
+function DealCard({ deal, onDelete, onEdit }) {
   const perKg = deal.type === "grocery" ? (deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit)) : null;
   const perLb = deal.type === "grocery" && perKg != null ? toPerLb(perKg, "/kg") : null;
   const perL  = deal.type === "gas" ? (deal.normalizedPerL ?? toPerL(deal.price, deal.unit)) : null;
   const perGal = deal.type === "gas" && perL != null ? toPerGal(perL, "/L") : null;
-
-  return (
+  
+ return (
     <div style={S.card}>
       <div style={S.row}>
         <div>
@@ -92,16 +93,24 @@ function DealCard({ deal, onDelete }) {
           <div style={S.muted}>{new Date(deal.addedAt).toLocaleString()}</div>
         </div>
       </div>
-      <div style={{ marginTop: 8, textAlign: "right" }}>
-        <button onClick={() => onDelete(deal.id)} style={{ ...S.button, background: "#fff", color: "#111", borderColor: "#e5e7eb" }}>
-          Delete
-        </button>
-      </div>
+      {/* Buttons live inside the card */}
+<div style={{ marginTop: 8, textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+  <button onClick={() => onEdit(deal.id)} style={{ ...S.button }} title="Edit price/unit">
+    Edit
+  </button>
+  <button
+    onClick={() => onDelete(deal.id)}
+    style={{ ...S.button, background: "#fff", color: "#111", borderColor: "#e5e7eb" }}
+  >
+    Delete
+  </button>
+</div>
+
     </div>
   );
 }
 
-function DealsList({ deals, onDelete }) {
+function DealsList({ deals, onDelete, onEdit }) {
   if (!deals.length) {
     return (
       <div style={{ ...S.container, padding: "0 16px 24px" }}>
@@ -115,7 +124,7 @@ function DealsList({ deals, onDelete }) {
     <div style={{ ...S.container, padding: "0 16px 24px" }}>
       <div style={S.list}>
         {deals.map((d) => (
-          <DealCard key={d.id} deal={d} onDelete={onDelete} />
+          <DealCard key={d.id} deal={d} onDelete={onDelete} onEdit={onEdit} />
         ))}
       </div>
     </div>
@@ -219,10 +228,17 @@ export default function App() {
       localStorage.setItem("kart-deals", JSON.stringify(deals));
     } catch {}
   }, [deals]);
-  
-  const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState("newest");
-  const [typeFilter, setTypeFilter] = useState("all");
+  // Persisted UI state
+    const [query, setQuery] = useState(() => localStorage.getItem("kart-query") || "");
+    const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortBy") || "newest");
+    const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
+
+    // Save to localStorage whenever they change
+    useEffect(() => { localStorage.setItem("kart-query", query); }, [query]);
+    useEffect(() => { localStorage.setItem("kart-sortBy", sortBy); }, [sortBy]);
+    useEffect(() => { localStorage.setItem("kart-typeFilter", typeFilter); }, [typeFilter]);
+
+
 
   function handleAdd(newDeal) {
     setDeals((d) => [newDeal, ...d]);
@@ -230,7 +246,35 @@ export default function App() {
   function handleDelete(id) {
     setDeals((d) => d.filter((x) => x.id !== id));
   }
+  function handleEdit(id) {
+  const d = deals.find(x => x.id === id);
+  if (!d) return;
 
+  const priceStr = prompt(`Update price for "${d.item}" (${d.unit}). Current: ${d.price}`, String(d.price));
+  if (priceStr == null) return; // user cancelled
+  const newPrice = Number(priceStr);
+  if (!Number.isFinite(newPrice) || newPrice <= 0) {
+    alert("Please enter a valid positive number for price.");
+    return;
+  }
+
+  const newUnit = (prompt('Unit (use one of: "ea", "/kg", "/lb", "/L", "/gal")', d.unit) || d.unit).trim();
+
+  // Recompute normalized fields used for sorting/comparison
+  let normalizedPerKg = d.normalizedPerKg ?? null;
+  let normalizedPerL  = d.normalizedPerL ?? null;
+  if (d.type === "grocery") {
+    normalizedPerKg = toPerKg(newPrice, newUnit);
+  } else if (d.type === "gas") {
+    normalizedPerL = toPerL(newPrice, newUnit);
+  }
+
+  setDeals(prev =>
+    prev.map(x =>
+      x.id === id ? { ...x, price: newPrice, unit: newUnit, normalizedPerKg, normalizedPerL } : x
+    )
+  );
+} 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let out = [...deals];
@@ -294,7 +338,8 @@ export default function App() {
         </div>
 
         <AddDealForm onAdd={handleAdd} />
-        <DealsList deals={filtered} onDelete={handleDelete} />
+        <DealsList deals={filtered} onDelete={handleDelete} onEdit={handleEdit} />
+
       </main>
     </div>
   );

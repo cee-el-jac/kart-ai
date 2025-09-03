@@ -1,54 +1,76 @@
 // src/components/DealCard.jsx
 import React from "react";
-import { toPerKg, toPerLb, toPerL, toPerGal, money } from "../utils/conversions";
+import { money, toPerKg, toPerLb, toPerGal, toPerL } from "../utils/conversions";
 
-export default function DealCard({ deal, onDelete }) {
-  const isGrocery = deal.type === "grocery";
-  const isGas = deal.type === "gas";
+const S = {
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: 16,
+    background: "#fff",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+  },
+  row: { display: "flex", alignItems: "center", gap: 8 },
+  title: { fontSize: 16, fontWeight: 700, margin: 0, color: "#111827" },
+  muted: { color: "#6b7280", fontSize: 12 },
+  price: { fontSize: 18, fontWeight: 700, textAlign: "right" },
+  footer: { marginTop: "auto", paddingTop: 8, textAlign: "right" },
+  button: {
+    border: "1px solid #e5e7eb",
+    background: "#fff",
+    color: "#111",
+    padding: "6px 10px",
+    borderRadius: 10,
+    cursor: "pointer",
+  },
+};
 
-  const perKg  = isGrocery ? toPerKg(deal.price, deal.unit) : null;
-  const perLb  = isGrocery ? toPerLb(deal.price, deal.unit) : null;
-  const perL   = isGas ? toPerL(deal.price, deal.unit) : null;
-  const perGal = isGas ? toPerGal(deal.price, deal.unit) : null;
+export default function DealCard({ deal, onDelete, onEdit }) {
+  // derived prices for display
+  const perKg = deal.type === "grocery" && deal.normalizedPerKg != null
+    ? deal.normalizedPerKg
+    : null;
+  const perLb = perKg != null ? toPerLb(perKg, "/kg") : null;
+
+  const perL = deal.type === "gas" && deal.normalizedPerL != null
+    ? deal.normalizedPerL
+    : null;
+  const perGal = perL != null ? toPerGal(perL, "/L") : null;
 
   return (
-    <div style={{
-      border: "1px solid #e5e7eb", borderRadius: 12, padding: 16,
-      display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center",
-      marginBottom: 12, background: "#fff"
-    }}>
-      <div>
-        <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4 }}>
-          {isGrocery ? "GROCERY" : "GAS"} • {(deal.store || deal.station) || "—"} • {deal.location}
-        </div>
-        <div style={{ fontWeight: 600 }}>{deal.item}</div>
-
-        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-          {isGrocery && (perKg != null || perLb != null) && (
-            <>
-              {perKg != null && <>≈ {money(perKg)} /kg</>}
-              {perKg != null && perLb != null && " · "}
-              {perLb != null && <>≈ {money(perLb)} /lb</>}
-            </>
-          )}
-          {isGas && (perL != null || perGal != null) && (
-            <>
-              {perL != null && <>≈ {money(perL)} /L</>}
-              {perL != null && perGal != null && " · "}
-              {perGal != null && <>≈ {money(perGal)} /gal</>}
-            </>
-          )}
-        </div>
+    <div style={S.card}>
+      <div style={S.row}>
+        <span className="badge" style={S.muted}>
+          {deal.type === "grocery" ? "GROCERY" : "GAS"}
+        </span>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ fontWeight: 700 }}>{money(deal.price)} {deal.unit}</div>
+      <h3 style={S.title}>{deal.item}</h3>
+      <div style={S.muted}>
+        {deal.store || deal.station} · {deal.location}
+      </div>
+
+      <div style={{ ...S.price, marginTop: 6 }}>
+        {money(deal.price)} <span style={{ ...S.muted, fontWeight: 400 }}>/{deal.unit}</span>
+      </div>
+
+      {perKg != null && (
+        <div style={S.muted}>≈ {money(perKg)} /kg · {money(perLb)} /lb</div>
+      )}
+      {perL != null && (
+        <div style={S.muted}>≈ {money(perL)} /L · {money(perGal)} /gal</div>
+      )}
+
+      <div style={S.muted}>{new Date(deal.addedAt).toLocaleString()}</div>
+
+      {/* Footer pinned to bottom */}
+      <div style={S.footer}>
         <button
-          onClick={() => onDelete(deal.id)}
-          style={{
-            padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 10,
-            background: "#fff", cursor: "pointer"
-          }}
+          onClick={() => onDelete?.(deal.id)}
+          style={S.button}
+          aria-label="Delete deal"
         >
           Delete
         </button>
