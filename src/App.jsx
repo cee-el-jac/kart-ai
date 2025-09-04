@@ -58,6 +58,48 @@ function Header() {
   );
 }
 
+function TypeToggle({ value, onChange }) {
+  const base = {
+    border: "1px solid #e5e7eb",
+    background: "#fff",
+    borderRadius: 12,
+    padding: 8,
+    width: 44,
+    height: 44,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  };
+  const active = {
+    border: "1px solid #16a34a", // branded green border
+    boxShadow: "0 0 0 3px rgba(22,163,74,0.15)",
+  };
+  const img = { width: 24, height: 24, objectFit: "contain" };
+
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <button
+        type="button"
+        aria-label="Grocery"
+        onClick={() => onChange("grocery")}
+        style={{ ...base, ...(value === "grocery" ? active : {}) }}
+      >
+        <img src="/icons/cart_icon.png" alt="" style={img} />
+      </button>
+      <button
+        type="button"
+        aria-label="Gas"
+        onClick={() => onChange("gas")}
+        style={{ ...base, ...(value === "gas" ? active : {}) }}
+      >
+        <img src="/icons/gas_icon.png" alt="" style={img} />
+      </button>
+    </div>
+  );
+}
+
+
 function DealCard({ deal, onDelete, onEdit }) {
   const perKg = deal.type === "grocery" ? (deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit)) : null;
   const perLb = deal.type === "grocery" && perKg != null ? toPerLb(perKg, "/kg") : null;
@@ -131,16 +173,24 @@ function DealsList({ deals, onDelete, onEdit }) {
   );
 }
 
-function AddDealForm({ onAdd }) {
-  const [form, setForm] = useState({
-    type: "grocery",
-    item: "",
-    store: "",
-    station: "",
-    location: "",
-    price: "",
-    unit: "/ea",
-  });
+function AddDealForm({ onAdd, activeType }) {
+    const [form, setForm] = useState({
+      type: activeType,
+      item: "",
+      store: "",
+      station: "",
+      location: "",
+      price: "",
+      unit: activeType === "gas" ? "/L" : "/ea",
+});
+    useEffect(() => {
+      setForm(f => ({
+        ...f,
+        type: activeType,
+        unit: activeType === "gas" ? "/L" : "/ea",
+      }));
+    }, [activeType]);
+
   const [error, setError] = useState("");
 
   const unitOptions = form.type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
@@ -180,11 +230,7 @@ function AddDealForm({ onAdd }) {
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
-        <select name="type" value={form.type} onChange={handleChange} style={{ ...S.input, gridColumn: "span 2" }}>
-          <option value="grocery">Grocery</option>
-          <option value="gas">Gas</option>
-        </select>
-
+        
         <input name="item" value={form.item} onChange={handleChange} placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"} style={{ ...S.input, gridColumn: "span 3" }} />
 
         {form.type === "grocery" ? (
@@ -324,11 +370,50 @@ export default function App() {
             placeholder="Search items, stores, stations, locations…"
             style={{ ...S.input, flex: "1 1 320px" }}
           />
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={S.input}>
-            <option value="all">All</option>
-            <option value="grocery">Grocery</option>
-            <option value="gas">Gas</option>
-          </select>
+         <div style={{ display: "flex", gap: 12 }}>
+  {/* Grocery Button */}
+  <button
+    onClick={() => setTypeFilter("grocery")}
+    style={{
+      border: typeFilter === "grocery" ? "2px solid #00674F" : "1px solid #e5e7eb",
+      background: typeFilter === "grocery" ? "#E7F3F0" : "#fff",
+      borderRadius: 12,
+      padding: 10,
+      cursor: "pointer"
+    }}
+  >
+    <img src="/icons/cart_icon.png" alt="Groceries" style={{ width: 28, height: 28 }} />
+  </button>
+
+  {/* Gas Button */}
+  <button
+    onClick={() => setTypeFilter("gas")}
+    style={{
+      border: typeFilter === "gas" ? "2px solid #00674F" : "1px solid #e5e7eb",
+      background: typeFilter === "gas" ? "#E7F3F0" : "#fff",
+      borderRadius: 12,
+      padding: 10,
+      cursor: "pointer"
+    }}
+  >
+    <img src="/icons/gas_icon.png" alt="Gas" style={{ width: 28, height: 28 }} />
+  </button>
+
+  {/* Optional "All" Button */}
+  <button
+    onClick={() => setTypeFilter("all")}
+    style={{
+      border: typeFilter === "all" ? "2px solid #00674F" : "1px solid #e5e7eb",
+      background: typeFilter === "all" ? "#E7F3F0" : "#fff",
+      borderRadius: 12,
+      padding: 10,
+      cursor: "pointer"
+    }}
+  >
+    All
+  </button>
+</div>
+
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.input}>
             <option value="newest">Newest</option>
             <option value="price-asc">Price (Low → High)</option>
@@ -337,7 +422,9 @@ export default function App() {
           </select>
         </div>
 
-        <AddDealForm onAdd={handleAdd} />
+        <AddDealForm AddDealForm
+          onAdd={handleAdd}
+          activeType={typeFilter === "all" ? "grocery" : typeFilter} />
         <DealsList deals={filtered} onDelete={handleDelete} onEdit={handleEdit} />
 
       </main>
