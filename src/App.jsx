@@ -59,7 +59,7 @@ function DealCard({
 }) {
   const perKg = deal.type === "grocery" ? (deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit)) : null;
   const perLb = deal.type === "grocery" && perKg != null ? toPerLb(perKg, "/kg") : null;
-  const perL = deal.type === "gas" ? (deal.normalizedPerL ?? toPerL(deal.price, deal.unit)) : null;
+  const perL  = deal.type === "gas" ? (deal.normalizedPerL ?? toPerL(deal.price, deal.unit)) : null;
   const perGal = deal.type === "gas" && perL != null ? toPerGal(perL, "/L") : null;
 
   return (
@@ -181,19 +181,27 @@ function DealsList({
   );
 }
 
-function AddDealForm({ onAdd }) {
+// NOTE: AddDealForm now receives `type` from parent (icon buttons control it)
+function AddDealForm({ onAdd, type }) {
   const [form, setForm] = useState({
-    type: "grocery",
     item: "",
     store: "",
     station: "",
     location: "",
     price: "",
-    unit: "/ea",
+    unit: type === "gas" ? "/L" : "/ea",
   });
   const [error, setError] = useState("");
 
-  const unitOptions = form.type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
+  // When `type` changes (via icon buttons), reset unit to a sensible default
+  useEffect(() => {
+    setForm((f) => ({
+      ...f,
+      unit: type === "gas" ? "/L" : (f.unit === "/L" || f.unit === "/gal" ? "/ea" : f.unit),
+    }));
+  }, [type]);
+
+  const unitOptions = type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -207,52 +215,86 @@ function AddDealForm({ onAdd }) {
     const priceNum = Number(form.price);
     if (!form.item.trim()) return setError("Item name is required.");
     if (!form.location.trim()) return setError("Location is required.");
-    if (form.type === "grocery" && !form.store.trim()) return setError("Store is required for groceries.");
+    if (type === "grocery" && !form.store.trim()) return setError("Store is required for groceries.");
     if (!Number.isFinite(priceNum) || priceNum <= 0) return setError("Enter a valid price.");
 
     onAdd({
       id: crypto.randomUUID(),
-      type: form.type,
+      type, // <-- comes from parent (icons)
       item: form.item.trim(),
       store: form.store.trim(),
       station: form.station.trim(),
       location: form.location.trim(),
       price: priceNum,
       unit: form.unit,
-      normalizedPerKg: form.type === "grocery" ? toPerKg(priceNum, form.unit) : null,
-      normalizedPerL: form.type === "gas" ? toPerL(priceNum, form.unit) : null,
+      normalizedPerKg: type === "grocery" ? toPerKg(priceNum, form.unit) : null,
+      normalizedPerL:  type === "gas"     ? toPerL(priceNum, form.unit) : null,
       addedAt: Date.now(),
     });
 
-    setForm({ type: "grocery", item: "", store: "", station: "", location: "", price: "", unit: "/ea" });
+    setForm({
+      item: "",
+      store: "",
+      station: "",
+      location: "",
+      price: "",
+      unit: type === "gas" ? "/L" : "/ea",
+    });
   }
 
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
-        <select name="type" value={form.type} onChange={handleChange} style={{ ...S.input, gridColumn: "span 2" }}>
-          <option value="grocery">Grocery</option>
-          <option value="gas">Gas</option>
-        </select>
+        {/* No type select here; icons control type */}
 
         <input
           name="item"
           value={form.item}
           onChange={handleChange}
-          placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
+          placeholder={type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
           style={{ ...S.input, gridColumn: "span 3" }}
         />
 
-        {form.type === "grocery" ? (
-          <input name="store" value={form.store} onChange={handleChange} placeholder="Store (e.g., Costco)" style={{ ...S.input, gridColumn: "span 2" }} />
+        {type === "grocery" ? (
+          <input
+            name="store"
+            value={form.store}
+            onChange={handleChange}
+            placeholder="Store (e.g., Costco)"
+            style={{ ...S.input, gridColumn: "span 2" }}
+          />
         ) : (
-          <input name="station" value={form.station} onChange={handleChange} placeholder="Station (e.g., Shell Alta Vista)" style={{ ...S.input, gridColumn: "span 2" }} />
+          <input
+            name="station"
+            value={form.station}
+            onChange={handleChange}
+            placeholder="Station (e.g., Shell Alta Vista)"
+            style={{ ...S.input, gridColumn: "span 2" }}
+          />
         )}
 
-        <input name="location" value={form.location} onChange={handleChange} placeholder="Location (City, Region)" style={{ ...S.input, gridColumn: "span 3" }} />
-        <input name="price" value={form.price} onChange={handleChange} placeholder="Price (e.g., 4.99)" style={{ ...S.input, gridColumn: "span 1" }} />
+        <input
+          name="location"
+          value={form.location}
+          onChange={handleChange}
+          placeholder="Location (City, Region)"
+          style={{ ...S.input, gridColumn: "span 3" }}
+        />
 
-        <select name="unit" value={form.unit} onChange={handleChange} style={{ ...S.input, gridColumn: "span 1" }}>
+        <input
+          name="price"
+          value={form.price}
+          onChange={handleChange}
+          placeholder="Price (e.g., 4.99)"
+          style={{ ...S.input, gridColumn: "span 1" }}
+        />
+
+        <select
+          name="unit"
+          value={form.unit}
+          onChange={handleChange}
+          style={{ ...S.input, gridColumn: "span 1" }}
+        >
           {unitOptions.map((u) => (
             <option key={u} value={u}>{u}</option>
           ))}
@@ -270,7 +312,7 @@ function AddDealForm({ onAdd }) {
 
 // ---------- App ----------
 export default function App() {
-  // deals state
+  // data state
   const [deals, setDeals] = useState(() => {
     try {
       const raw = localStorage.getItem("kart-deals");
@@ -290,38 +332,34 @@ export default function App() {
   // persisted UI state
   const [query, setQuery] = useState(() => localStorage.getItem("kart-query") || "");
   const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortBy") || "newest");
-  const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
 
-  useEffect(() => { localStorage.setItem("kart-query", query); }, [query]);
-  useEffect(() => { localStorage.setItem("kart-sortBy", sortBy); }, [sortBy]);
-  useEffect(() => { localStorage.setItem("kart-typeFilter", typeFilter); }, [typeFilter]);
+  // ONE source of truth for type: icons control this.
+  // "all" shows both; the form uses "grocery" or "gas".
+  const [activeType, setActiveType] = useState(() => localStorage.getItem("kart-activeType") || "all");
+  useEffect(() => { localStorage.setItem("kart-activeType", activeType); }, [activeType]);
 
   // inline edit UI state
   const [editingId, setEditingId] = useState(null);
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
 
-  // handlers (TOP-LEVEL, not nested)
+  // handlers
   function handleAdd(newDeal) {
     setDeals((d) => [newDeal, ...d]);
   }
-
   function handleDelete(id) {
     setDeals((d) => d.filter((x) => x.id !== id));
   }
-
   function handleStartEdit(deal) {
     setEditingId(deal.id);
     setEditPrice(String(deal.price));
     setEditUnit(deal.unit);
   }
-
   function handleCancelEdit() {
     setEditingId(null);
     setEditPrice("");
     setEditUnit("/ea");
   }
-
   function handleSave() {
     if (!editingId) return;
     const newPrice = Number(editPrice);
@@ -335,7 +373,7 @@ export default function App() {
       prev.map((d) => {
         if (d.id !== editingId) return d;
         let normalizedPerKg = d.normalizedPerKg ?? null;
-        let normalizedPerL = d.normalizedPerL ?? null;
+        let normalizedPerL  = d.normalizedPerL ?? null;
         if (d.type === "grocery") normalizedPerKg = toPerKg(newPrice, newUnit);
         else if (d.type === "gas") normalizedPerL = toPerL(newPrice, newUnit);
         return { ...d, price: newPrice, unit: newUnit, normalizedPerKg, normalizedPerL };
@@ -347,15 +385,19 @@ export default function App() {
     setEditUnit("/ea");
   }
 
+  // derived & filtered list
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let out = [...deals];
-    if (typeFilter !== "all") out = out.filter((d) => d.type === typeFilter);
+
+    if (activeType !== "all") out = out.filter((d) => d.type === activeType);
+
     if (q) {
       out = out.filter((d) =>
         [d.item, d.store, d.station, d.location].some((v) => (v || "").toLowerCase().includes(q))
       );
     }
+
     switch (sortBy) {
       case "price-asc":
         out.sort((a, b) => {
@@ -382,7 +424,10 @@ export default function App() {
         out.sort((a, b) => b.addedAt - a.addedAt);
     }
     return out;
-  }, [deals, query, sortBy, typeFilter]);
+  }, [deals, query, sortBy, activeType]);
+
+  // What type should the Add form use?
+  const formType = activeType === "all" ? "grocery" : activeType;
 
   // ---------- RENDER ----------
   return (
@@ -398,42 +443,42 @@ export default function App() {
             style={{ ...S.input, flex: "1 1 320px" }}
           />
 
-          {/* Icon toggle buttons */}
+          {/* Icon toggle buttons (single source of truth) */}
           <div style={{ display: "flex", gap: 12 }}>
             <button
-              onClick={() => setTypeFilter("grocery")}
+              onClick={() => setActiveType("grocery")}
               style={{
-                border: typeFilter === "grocery" ? "2px solid #00674F" : "1px solid #e5e7eb",
-                background: typeFilter === "grocery" ? "#E7F3F0" : "#fff",
+                border: activeType === "grocery" ? "2px solid #00674F" : "1px solid #e5e7eb",
+                background: activeType === "grocery" ? "#E7F3F0" : "#fff",
                 borderRadius: 12, padding: 10, cursor: "pointer"
               }}
-              aria-pressed={typeFilter === "grocery"}
+              aria-pressed={activeType === "grocery"}
               aria-label="Show groceries"
             >
               <img src="/icons/cart_icon.png" alt="Groceries" style={{ width: 28, height: 28 }} />
             </button>
 
             <button
-              onClick={() => setTypeFilter("gas")}
+              onClick={() => setActiveType("gas")}
               style={{
-                border: typeFilter === "gas" ? "2px solid #00674F" : "1px solid #e5e7eb",
-                background: typeFilter === "gas" ? "#E7F3F0" : "#fff",
+                border: activeType === "gas" ? "2px solid #00674F" : "1px solid #e5e7eb",
+                background: activeType === "gas" ? "#E7F3F0" : "#fff",
                 borderRadius: 12, padding: 10, cursor: "pointer"
               }}
-              aria-pressed={typeFilter === "gas"}
+              aria-pressed={activeType === "gas"}
               aria-label="Show gas"
             >
               <img src="/icons/gas_icon.png" alt="Gas" style={{ width: 28, height: 28 }} />
             </button>
 
             <button
-              onClick={() => setTypeFilter("all")}
+              onClick={() => setActiveType("all")}
               style={{
-                border: typeFilter === "all" ? "2px solid #00674F" : "1px solid #e5e7eb",
-                background: typeFilter === "all" ? "#E7F3F0" : "#fff",
+                border: activeType === "all" ? "2px solid #00674F" : "1px solid #e5e7eb",
+                background: activeType === "all" ? "#E7F3F0" : "#fff",
                 borderRadius: 12, padding: 10, cursor: "pointer"
               }}
-              aria-pressed={typeFilter === "all"}
+              aria-pressed={activeType === "all"}
             >
               All
             </button>
@@ -447,7 +492,8 @@ export default function App() {
           </select>
         </div>
 
-        <AddDealForm onAdd={handleAdd} />
+        {/* Form now controlled by activeType */}
+        <AddDealForm onAdd={handleAdd} type={formType} />
 
         <DealsList
           deals={filtered}
@@ -465,4 +511,3 @@ export default function App() {
     </div>
   );
 }
-
