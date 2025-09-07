@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
+import { app } from "./firebaseClient";
+
+// temporary sanity check (safe optional chaining)
+console.log("Firebase connected:", app?.options?.projectId);
+
+
 
 /* ---------------------------- styles / tokens ---------------------------- */
 const S = {
