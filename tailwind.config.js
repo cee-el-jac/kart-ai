@@ -3,7 +3,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        kartGreen: '#046307', // Kart AI green
+        kartGreen: '#00674F', // Kart AI green
       },
     },
   },

@@ -1,88 +1,90 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
+import {
+  toPerKg,
+  toPerLb,
+  toPerL,
+  toPerGal,
+  money
+} from "./utils/conversions";
 
-/** Branding */
-const BRAND = "#00674F";
-const BRAND_BG = "#E7F3F0";
-
-/** Styles */
+// ---------- simple styles ----------
 const S = {
-  page: {
-    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-    color: "#111",
-    background: "#fff",
-    minHeight: "100vh",
-  },
+  page: { fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,sans-serif", color: "#111", background: "#fff", minHeight: "100vh" },
   container: { maxWidth: 960, margin: "0 auto", padding: "0 16px" },
   header: {
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-    backdropFilter: "blur(6px)",
-    background: "rgba(255,255,255,0.85)",
-    borderBottom: "1px solid #e5e7eb",
-    padding: "16px 12px",
-    display: "flex",
-    alignItems: "center",
+    position: "sticky", top: 0, zIndex: 10, backdropFilter: "blur(6px)", background: "rgba(255,255,255,0.85)",
+    borderBottom: "1px solid #e5e7eb", padding: "16px 12px", display: "flex", alignItems: "center",
   },
-  headerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 0",
-  },
+  headerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" },
   headLeft: { display: "flex", alignItems: "center", gap: 12 },
-  logo: { width: 80, height: 80, borderRadius: 12, objectFit: "cover", background: "#fff" },
+  logo: { width: 80, height: 80, borderRadius: 12, objectFit: "cover", display: "block", background: "#fff" },
   subtitle: { margin: 0, fontSize: 12, color: "#6b7280" },
-
-  formGrid: { display: "grid", gap: 8, gridTemplateColumns: "repeat(12, 1fr)", margin: "16px 0" },
-  input: {
-    padding: "10px 12px",
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    outline: "none",
-  },
-
-  button: {
-    padding: "10px 14px",
-    borderRadius: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    transition: "all .2s ease",
-  },
-  buttonAdd: { background: BRAND, border: `1px solid ${BRAND}`, color: "#fff" },
-  buttonEdit: { background: "#fff", border: `1px solid ${BRAND}`, color: BRAND },
-  buttonDelete: { background: "#fff", border: "1px solid #b91c1c", color: "#b91c1c" },
-
-  pill: (active) => ({
-    border: active ? `2px solid ${BRAND}` : "1px solid #e5e7eb",
-    background: active ? BRAND_BG : "#fff",
-    borderRadius: 12,
-    padding: 10,
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  }),
-
+  form: { display: "grid", gap: 8, gridTemplateColumns: "repeat(12, 1fr)", margin: "16px 0" },
+  input: { padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 12, outline: "none" },
   list: { display: "grid", gap: 10, marginBottom: 40 },
   card: { border: "1px solid #e5e7eb", borderRadius: 16, padding: 14 },
   row: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   badge: { fontSize: 10, textTransform: "uppercase", letterSpacing: 0.6, border: "1px solid #e5e7eb", padding: "2px 6px", borderRadius: 999 },
   h3: { margin: "6px 0 2px", fontSize: 16, fontWeight: 600 },
   muted: { fontSize: 12, color: "#6b7280" },
-  error: { color: "#b91c1c", fontSize: 13, marginTop: 4 },
+  error: { color: "#b91c1c", fontSize: 13, marginTop: 4 }
 };
 
-/** Header */
+// ---- brand + button styles ----
+const BRAND = {
+  green: "#00674F",
+  greenBg: "#E7F3F0",
+  danger: "#b91c1c",
+  grayBorder: "#e5e7eb",
+  text: "#111",
+  white: "#fff",
+};
+
+const BTN = {
+  base: {
+    padding: "10px 14px",
+    borderRadius: 12,
+    cursor: "pointer",
+    border: `1px solid ${BRAND.grayBorder}`,
+    background: BRAND.white,
+    color: BRAND.text,
+  },
+  primary: {
+    background: BRAND.green,
+    color: BRAND.white,
+    border: `1px solid ${BRAND.green}`,
+  },
+  secondary: {
+    background: BRAND.white,
+    color: BRAND.text,
+    border: `1px solid ${BRAND.grayBorder}`,
+  },
+  // >>> Add this block
+  neutral: {
+    background: "#f3f4f6",   // subtle gray
+    color: "#374151",
+    border: "1px solid #d1d5db",
+    transition: "background 0.2s ease, color 0.2s ease",
+  },
+  // <<<
+  danger: {
+    background: BRAND.white,
+    color: BRAND.danger,
+    border: `1px solid ${BRAND.danger}`,
+  },
+};
+
+// ---------- components ----------
 function Header() {
   return (
     <header style={S.header}>
-      <div style={S.container}>
+      <div style={{ ...S.container }}>
         <div style={S.headerRow}>
           <div style={S.headLeft}>
             <img src="/kart-logo.png" alt="KART AI logo" style={S.logo} />
-            <p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p>
+            <div style={S.headLeft}>
+              <p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -90,7 +92,6 @@ function Header() {
   );
 }
 
-/** Deal Card */
 function DealCard({
   deal,
   onDelete,
@@ -116,7 +117,9 @@ function DealCard({
             <span style={S.badge}>{deal.type === "grocery" ? "Grocery" : "Gas"}</span>
             {deal.station ? <span style={S.muted}>{deal.station}</span> : null}
           </div>
+
           <h3 style={S.h3}>{deal.item}</h3>
+
           <p style={S.muted}>
             {(deal.store || deal.station) ? `${deal.store || deal.station} · ` : ""}
             {deal.location}
@@ -128,16 +131,20 @@ function DealCard({
             {money(deal.price)}{" "}
             <span style={{ ...S.muted, fontWeight: 400 }}>{deal.unit}</span>
           </div>
+
           {deal.type === "grocery" && perKg != null && (
             <div style={S.muted}>≈ {money(perKg)} /kg · ≈ {money(perLb)} /lb</div>
           )}
+
           {deal.type === "gas" && perL != null && (
             <div style={S.muted}>≈ {money(perL)} /L · ≈ {money(perGal)} /gal</div>
           )}
+
           <div style={S.muted}>{new Date(deal.addedAt).toLocaleString()}</div>
         </div>
       </div>
 
+      {/* Inline edit vs normal buttons */}
       {editingId === deal.id ? (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
@@ -146,28 +153,43 @@ function DealCard({
               value={editPrice}
               onChange={(e) => setEditPrice(e.target.value)}
               placeholder="Price"
-              style={{ ...S.input, width: 110 }}
+              style={{ ...S.input, width: 100 }}
             />
-            <select value={editUnit} onChange={(e) => setEditUnit(e.target.value)} style={{ ...S.input, width: 110 }}>
+            <select
+              value={editUnit}
+              onChange={(e) => setEditUnit(e.target.value)}
+              style={{ ...S.input, width: 100 }}
+            >
               {["/ea", "/dozen", "/lb", "/kg", "/100g", "/L", "/gal"].map((u) => (
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
-            <button onClick={onSave} style={{ ...S.button, ...S.buttonAdd }}>Save</button>
-            <button onClick={onCancelEdit} style={{ ...S.button, ...S.buttonDelete }}>Cancel</button>
+            <button onClick={onSave} style={{ ...BTN.base, ...BTN.primary }}>Save</button>
+            <button onClick={onCancelEdit} style={{ ...BTN.base, ...BTN.secondary }}>Cancel</button>
           </div>
         </div>
       ) : (
         <div style={{ marginTop: 8, textAlign: "right", display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={() => onStartEdit(deal)} style={{ ...S.button, ...S.buttonEdit }} title="Edit price/unit">Edit</button>
-          <button onClick={() => onDelete(deal.id)} style={{ ...S.button, ...S.buttonDelete }}>Delete</button>
+          <button
+            onClick={() => onStartEdit(deal)}
+            style={{ ...BTN.base, ...BTN.primary }}
+            title="Edit price/unit"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(deal.id)}
+            style={{ ...BTN.base, ...BTN.danger }}
+          >
+            Delete
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-/** List */
+
 function DealsList({
   deals,
   onDelete,
@@ -189,7 +211,6 @@ function DealsList({
       </div>
     );
   }
-
   return (
     <div style={{ ...S.container, padding: "0 16px 24px" }}>
       <div style={S.list}>
@@ -213,28 +234,28 @@ function DealsList({
   );
 }
 
-/** Add Form (type is driven by parent via props) */
-function AddDealForm({ onAdd, selectedType }) {
+// AddDealForm now accepts forcedType to sync with the filter toggle
+function AddDealForm({ onAdd, forcedType }) {
   const [form, setForm] = useState({
+    type: "grocery",
     item: "",
     store: "",
     station: "",
     location: "",
     price: "",
-    unit: selectedType === "grocery" ? "/ea" : "/L",
+    unit: "/ea",
   });
   const [error, setError] = useState("");
 
-  // When selectedType changes (via icon buttons), reset unit sensibly
+  // When forcedType is provided ("grocery" or "gas"), keep form.type in sync
   useEffect(() => {
-    setForm((f) => ({
-      ...f,
-      unit: selectedType === "grocery" ? (["/ea", "/dozen", "/lb", "/kg", "/100g"].includes(f.unit) ? f.unit : "/ea")
-                                      : (["/L", "/gal"].includes(f.unit) ? f.unit : "/L"),
-    }));
-  }, [selectedType]);
+    if (forcedType === "grocery" || forcedType === "gas") {
+      setForm(f => ({ ...f, type: forcedType, unit: forcedType === "grocery" ? "/ea" : "/L" }));
+    }
+  }, [forcedType]);
 
-  const unitOptions = selectedType === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
+  const unitOptions =
+    form.type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -248,55 +269,65 @@ function AddDealForm({ onAdd, selectedType }) {
     const priceNum = Number(form.price);
     if (!form.item.trim()) return setError("Item name is required.");
     if (!form.location.trim()) return setError("Location is required.");
-    if (selectedType === "grocery" && !form.store.trim()) return setError("Store is required for groceries.");
+    if (form.type === "grocery" && !form.store.trim()) return setError("Store is required for groceries.");
     if (!Number.isFinite(priceNum) || priceNum <= 0) return setError("Enter a valid price.");
 
-    const newDeal = {
+    onAdd({
       id: crypto.randomUUID(),
-      type: selectedType, // from parent
+      type: form.type,
       item: form.item.trim(),
-      store: (selectedType === "grocery" ? form.store.trim() : ""),
-      station: (selectedType === "gas" ? form.station.trim() : ""),
+      store: form.store.trim(),
+      station: form.station.trim(),
       location: form.location.trim(),
       price: priceNum,
       unit: form.unit,
-      normalizedPerKg: selectedType === "grocery" ? toPerKg(priceNum, form.unit) : null,
-      normalizedPerL: selectedType === "gas" ? toPerL(priceNum, form.unit) : null,
+      normalizedPerKg: form.type === "grocery" ? toPerKg(priceNum, form.unit) : null,
+      normalizedPerL: form.type === "gas" ? toPerL(priceNum, form.unit) : null,
       addedAt: Date.now(),
-    };
+    });
 
-    onAdd(newDeal);
-
-    // reset (keep unit sensible for the current type)
     setForm({
+      type: forcedType === "grocery" || forcedType === "gas" ? forcedType : "grocery",
       item: "",
       store: "",
       station: "",
       location: "",
       price: "",
-      unit: selectedType === "grocery" ? "/ea" : "/L",
+      unit: forcedType === "gas" ? "/L" : "/ea",
     });
   }
 
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
-      <div style={S.formGrid}>
-        {/* No type <select> here — type is controlled by the icon buttons */}
+      <div style={S.form}>
+        {/* If forcedType is set, disable the selector (so it mirrors the toggle) */}
+        <select
+          name="type"
+          value={form.type}
+          onChange={handleChange}
+          disabled={forcedType === "grocery" || forcedType === "gas"}
+          style={{ ...S.input, gridColumn: "span 2", opacity: (forcedType ? 0.7 : 1) }}
+          title={forcedType ? "Type is controlled by the toggle above" : "Select type"}
+        >
+          <option value="grocery">Grocery</option>
+          <option value="gas">Gas</option>
+        </select>
+
         <input
           name="item"
           value={form.item}
           onChange={handleChange}
-          placeholder={selectedType === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
-          style={{ ...S.input, gridColumn: "span 4" }}
+          placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
+          style={{ ...S.input, gridColumn: "span 3" }}
         />
 
-        {selectedType === "grocery" ? (
+        {form.type === "grocery" ? (
           <input
             name="store"
             value={form.store}
             onChange={handleChange}
             placeholder="Store (e.g., Costco)"
-            style={{ ...S.input, gridColumn: "span 3" }}
+            style={{ ...S.input, gridColumn: "span 2" }}
           />
         ) : (
           <input
@@ -304,7 +335,7 @@ function AddDealForm({ onAdd, selectedType }) {
             value={form.station}
             onChange={handleChange}
             placeholder="Station (e.g., Shell Alta Vista)"
-            style={{ ...S.input, gridColumn: "span 3" }}
+            style={{ ...S.input, gridColumn: "span 2" }}
           />
         )}
 
@@ -338,16 +369,29 @@ function AddDealForm({ onAdd, selectedType }) {
 
       {error && <p style={S.error}>{error}</p>}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-        <button type="submit" style={{ ...S.button, ...S.buttonAdd }}>Add</button>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+        {/* Reset button here too (secondary) */}
+        <button type="button" onClick={() => {
+          setForm({
+            type: forcedType === "grocery" || forcedType === "gas" ? forcedType : "grocery",
+            item: "",
+            store: "",
+            station: "",
+            location: "",
+            price: "",
+            unit: forcedType === "gas" ? "/L" : "/ea",
+          });
+        }} style={{ ...BTN.base, ...BTN.secondary }}>
+          Reset
+        </button>
+        <button type="submit" style={{ ...BTN.base, ...BTN.primary }}>Add</button>
       </div>
     </form>
   );
 }
 
-/** App */
 export default function App() {
-  // Deals storage
+  // deals state (persisted)
   const [deals, setDeals] = useState(() => {
     try {
       const raw = localStorage.getItem("kart-deals");
@@ -362,7 +406,7 @@ export default function App() {
     } catch {}
   }, [deals]);
 
-  // List/search/sort UI state (persisted)
+  // UI state (persisted)
   const [query, setQuery] = useState(() => localStorage.getItem("kart-query") || "");
   const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortBy") || "newest");
   const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
@@ -370,15 +414,12 @@ export default function App() {
   useEffect(() => { localStorage.setItem("kart-sortBy", sortBy); }, [sortBy]);
   useEffect(() => { localStorage.setItem("kart-typeFilter", typeFilter); }, [typeFilter]);
 
-  // Form type is controlled by the icon buttons too (kept separate so when you choose "All" the form keeps last type)
-  const [formType, setFormType] = useState("grocery");
-
   // Inline edit UI state
   const [editingId, setEditingId] = useState(null);
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
 
-  // Handlers
+  // handlers
   function handleAdd(newDeal) {
     setDeals((d) => [newDeal, ...d]);
   }
@@ -402,14 +443,22 @@ export default function App() {
       alert("Please enter a valid positive number for price.");
       return;
     }
+ 
+
+
+
     const newUnit = editUnit.trim();
-    setDeals((prev) =>
-      prev.map((d) => {
+
+    setDeals(prev =>
+      prev.map(d => {
         if (d.id !== editingId) return d;
         let normalizedPerKg = d.normalizedPerKg ?? null;
-        let normalizedPerL = d.normalizedPerL ?? null;
-        if (d.type === "grocery") normalizedPerKg = toPerKg(newPrice, newUnit);
-        else if (d.type === "gas") normalizedPerL = toPerL(newPrice, newUnit);
+        let normalizedPerL  = d.normalizedPerL ?? null;
+        if (d.type === "grocery") {
+          normalizedPerKg = toPerKg(newPrice, newUnit);
+        } else if (d.type === "gas") {
+          normalizedPerL = toPerL(newPrice, newUnit);
+        }
         return { ...d, price: newPrice, unit: newUnit, normalizedPerKg, normalizedPerL };
       })
     );
@@ -418,38 +467,32 @@ export default function App() {
     setEditUnit("/ea");
   }
 
-  // Derived filtered list
+  // filtering/sorting
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let out = [...deals];
     if (typeFilter !== "all") out = out.filter((d) => d.type === typeFilter);
     if (q) {
       out = out.filter((d) =>
-        [d.item, d.store, d.station, d.location].some((v) =>
-          (v || "").toLowerCase().includes(q)
-        )
+        [d.item, d.store, d.station, d.location].some((v) => (v || "").toLowerCase().includes(q))
       );
     }
     switch (sortBy) {
       case "price-asc":
         out.sort((a, b) => {
-          const aNorm = a.type === "grocery"
-            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
-            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
-          const bNorm = b.type === "grocery"
-            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
-            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
+          const aNorm = a.type === "grocery" ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
+                                             : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
+          const bNorm = b.type === "grocery" ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
+                                             : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
           return (aNorm ?? Infinity) - (bNorm ?? Infinity);
         });
         break;
       case "price-desc":
         out.sort((a, b) => {
-          const aNorm = a.type === "grocery"
-            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
-            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
-          const bNorm = b.type === "grocery"
-            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
-            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
+          const aNorm = a.type === "grocery" ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
+                                             : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
+          const bNorm = b.type === "grocery" ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
+                                             : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
           return (bNorm ?? -Infinity) - (aNorm ?? -Infinity);
         });
         break;
@@ -462,19 +505,24 @@ export default function App() {
     return out;
   }, [deals, query, sortBy, typeFilter]);
 
-  /** Button click wiring */
-  function clickGrocery() {
-    setTypeFilter("grocery");
-    setFormType("grocery");
-  }
-  function clickGas() {
-    setTypeFilter("gas");
-    setFormType("gas");
-  }
-  function clickAll() {
-    setTypeFilter("all");
-    // keep formType as-is so the form doesn't jump around
-  }
+  
+    
+  
+// top-level reset (search + filters + sort + edit state)
+function handleResetAll() {
+  setQuery("");
+  setSortBy("newest");
+  setTypeFilter("all");
+
+  // also clear inline-edit state
+  setEditingId(null);
+  setEditPrice("");
+  setEditUnit("/ea");
+}
+
+
+  // forcedType for AddDealForm = mirror the filter toggle when not "all"
+  const forcedType = (typeFilter === "grocery" || typeFilter === "gas") ? typeFilter : null;
 
   return (
     <div style={S.page}>
@@ -489,15 +537,47 @@ export default function App() {
             style={{ ...S.input, flex: "1 1 320px" }}
           />
 
-          {/* Icon filter buttons */}
+          {/* Icon toggle buttons */}
           <div style={{ display: "flex", gap: 12 }}>
-            <button onClick={clickGrocery} style={S.pill(typeFilter === "grocery")} title="Groceries">
+            <button
+              onClick={() => setTypeFilter("grocery")}
+              style={{
+                border: typeFilter === "grocery" ? `2px solid ${BRAND.green}` : `1px solid ${BRAND.grayBorder}`,
+                background: typeFilter === "grocery" ? BRAND.greenBg : BRAND.white,
+                borderRadius: 12,
+                padding: 10,
+                cursor: "pointer"
+              }}
+              title="Show grocery deals (and set Add form to Grocery)"
+            >
               <img src="/icons/cart_icon.png" alt="Groceries" style={{ width: 28, height: 28 }} />
             </button>
-            <button onClick={clickGas} style={S.pill(typeFilter === "gas")} title="Gas">
+
+            <button
+              onClick={() => setTypeFilter("gas")}
+              style={{
+                border: typeFilter === "gas" ? `2px solid ${BRAND.green}` : `1px solid ${BRAND.grayBorder}`,
+                background: typeFilter === "gas" ? BRAND.greenBg : BRAND.white,
+                borderRadius: 12,
+                padding: 10,
+                cursor: "pointer"
+              }}
+              title="Show gas deals (and set Add form to Gas)"
+            >
               <img src="/icons/gas_icon.png" alt="Gas" style={{ width: 28, height: 28 }} />
             </button>
-            <button onClick={clickAll} style={S.pill(typeFilter === "all")} title="All">
+
+            <button
+              onClick={() => setTypeFilter("all")}
+              style={{
+                border: typeFilter === "all" ? `2px solid ${BRAND.green}` : `1px solid ${BRAND.grayBorder}`,
+                background: typeFilter === "all" ? BRAND.greenBg : BRAND.white,
+                borderRadius: 12,
+                padding: "10px 14px",
+                cursor: "pointer"
+              }}
+              title="Show all deals"
+            >
               All
             </button>
           </div>
@@ -508,12 +588,27 @@ export default function App() {
             <option value="price-desc">Price (High → Low)</option>
             <option value="alpha">A → Z</option>
           </select>
-        </div>
 
-        {/* Add form: uses formType driven by buttons */}
-        <AddDealForm onAdd={handleAdd} selectedType={formType} />
+          {/* RESET button (top-level) */}
+          <button 
+            onClick={handleResetAll}
+            style={{ ...BTN.base, ...BTN.neutral }}
+            title="Clear search, filters, sort"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#e5e7eb";
+              e.currentTarget.style.color = "#111";
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.background = "#f3f4f6";
+    e.currentTarget.style.color = "#374151";
+  }}
+>
+    Reset
+    </button>
+  </div>
 
-        {/* List */}
+        <AddDealForm onAdd={handleAdd} forcedType={forcedType} />
+
         <DealsList
           deals={filtered}
           onDelete={handleDelete}
@@ -530,4 +625,7 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
