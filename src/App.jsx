@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
-import { app } from "./firebaseClient";
+import { db } from "./firebaseClient";
+import {
+  collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
+  onSnapshot, serverTimestamp, query, orderBy
+} from "firebase/firestore";
 
-// temporary sanity check (safe optional chaining)
-console.log("Firebase connected:", app?.options?.projectId);
 
 
 
@@ -314,44 +316,58 @@ function AddDealForm({ onAdd, forcedType }) {
     setForm((f) => ({ ...f, [name]: value }));
   }
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
+  async function handleSubmit(e) {
+  e.preventDefault();
+  setError("");
 
-    const priceNum = Number(form.price);
-    if (!form.item.trim()) return setError("Item name is required.");
-    if (!form.location.trim()) return setError("Location is required.");
-    if (form.type === "grocery" && !form.store.trim())
-      return setError("Store is required for groceries.");
-    if (!Number.isFinite(priceNum) || priceNum <= 0)
-      return setError("Enter a valid price.");
-
-    onAdd({
-      id: crypto.randomUUID(),
-      type: form.type,
-      item: form.item.trim(),
-      store: form.store.trim(),
-      station: form.station.trim(),
-      location: form.location.trim(),
-      price: priceNum,
-      unit: form.unit,
-      normalizedPerKg:
-        form.type === "grocery" ? toPerKg(priceNum, form.unit) : null,
-      normalizedPerL:
-        form.type === "gas" ? toPerL(priceNum, form.unit) : null,
-      addedAt: Date.now(),
-    });
-
-    setForm({
-      type: forcedType === "grocery" || forcedType === "gas" ? forcedType : "grocery",
-      item: "",
-      store: "",
-      station: "",
-      location: "",
-      price: "",
-      unit: forcedType === "gas" ? "/L" : "/ea",
-    });
+  // basic validation (same rules you already use)
+  if (!form.item?.trim()) return setError("Item name is required.");
+  if (form.type === "grocery" && !form.store?.trim()) {
+    return setError("Store is required.");
   }
+  if (form.type === "gas" && !form.station?.trim()) {
+    return setError("Station is required.");
+  }
+  const priceNum = Number(form.price);
+  if (!isFinite(priceNum) || priceNum <= 0) {
+    return setError("Enter a valid price.");
+  }
+
+  // shape the document for Firestore (timestamps are added in createDeal)
+  const toSave = {
+    type: form.type,                  // "grocery" | "gas"
+    item: form.item?.trim() || "",
+    store: form.store?.trim() || "",
+    station: form.station?.trim() || "",
+    location: form.location?.trim() || "",
+    unit: form.unit,                  // "/ea", "/L", etc.
+    price: priceNum,
+
+    // keep your normalized fields if you already compute them in state
+    normalizedPerKg: form.normalizedPerKg ?? null,
+    normalizedPerL:  form.normalizedPerL  ?? null,
+  };
+
+  try {
+    // 🔗 write to Firestore
+      await onAdd(toSave);           // << use the prop from App.jsx
+  // clear the form on success
+  setForm({
+    type: "grocery",
+    item: "",
+    store: "",
+    station: "",
+    location: "",
+    unit: "/ea",
+    price: "",
+    });
+    setError("");
+  } catch (err) {
+    console.error("Error adding deal:", err);
+    setError("Failed to save. Try again.");
+  }
+}
+
 
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
@@ -469,11 +485,104 @@ export default function App() {
       return [];
     }
   });
+
+   const dealsCol = collection(db, "deals"); 
+
+   // --- Firestore helper functions ---
+
+// Add a new deal
+async function createDeal(deal) {
+  try {
+    await addDoc(dealsCol, {
+      ...deal,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Error adding deal: ", err);
+  }
+}
+
+// Update an existing deal
+async function updateDeal(id, updates) {
+  try {
+    const ref = doc(dealsCol, id);
+    await updateDoc(ref, {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("Error updating deal: ", err);
+  }
+}
+
+// Delete a deal
+async function removeDeal(id) {
+  try {
+    const ref = doc(dealsCol, id);
+    await deleteDoc(ref);
+  } catch (err) {
+    console.error("Error deleting deal: ", err);
+  }
+}
+
+
+
+
+
   useEffect(() => {
     try {
       localStorage.setItem("kart-deals", JSON.stringify(deals));
     } catch {}
   }, [deals]);
+
+  // Live subscribe to Firestore "deals"
+useEffect(() => {
+  // open a real-time listener
+  const unsubscribe = onSnapshot(
+    dealsCol,
+    (snap) => {
+      // if there are no docs yet, keep whatever we already have (localStorage)
+      if (snap.empty) return;
+
+      const fromDb = snap.docs.map((doc) => {
+        const d = doc.data();
+        return {
+          // Firestore id
+          id: doc.id,
+
+          // fields (use sensible fallbacks to match your existing shape)
+          type: d.type ?? "grocery",          // "grocery" | "gas"
+          item: d.item ?? "",
+          store: d.store ?? "",
+          station: d.station ?? "",
+          location: d.location ?? "",
+          unit: d.unit ?? "/ea",
+          price: d.price ?? 0,
+
+          // normalized fields you already compute/use
+          normalizedPerKg: d.normalizedPerKg ?? null,
+          normalizedPerL:  d.normalizedPerL  ?? null,
+
+          // timestamps (ok if missing)
+          createdAt: d.createdAt?.toMillis?.() ?? null,
+          updatedAt: d.updatedAt?.toMillis?.() ?? null,
+        };
+      });
+
+      // replace UI state; your existing "save to localStorage when deals changes"
+      // effect will persist this automatically.
+      setDeals(fromDb);
+    },
+    (err) => {
+      console.error("Firestore onSnapshot error:", err);
+    }
+  );
+
+  // cleanup on unmount/hot-reload
+  return () => unsubscribe();
+}, []); // ← no deps: subscribe once
+
 
   /* UI state (persisted) */
   const [query, setQuery] = useState(() => localStorage.getItem("kart-query") || "");
