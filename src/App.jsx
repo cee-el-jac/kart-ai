@@ -372,18 +372,7 @@ function AddDealForm({ onAdd, forcedType }) {
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
-        <select
-          name="type"
-          value={form.type}
-          onChange={handleChange}
-          disabled={forcedType === "grocery" || forcedType === "gas"}
-          style={{ ...S.input, gridColumn: "span 2", opacity: forcedType ? 0.7 : 1 }}
-          title={forcedType ? "Type is controlled by the toggle above" : "Select type"}
-        >
-          <option value="grocery">Grocery</option>
-          <option value="gas">Gas</option>
-        </select>
-
+        
         <input
           name="item"
           value={form.item}
