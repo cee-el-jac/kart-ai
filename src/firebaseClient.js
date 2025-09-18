@@ -1,23 +1,19 @@
 // src/firebaseClient.js
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
+// TODO: replace with *your* Firebase config from the Firebase Console
 const firebaseConfig = {
-  apiKey: "AIzaSyC3w7AkGt9dw-VPbkn_B89byzzkLDL29E",
-  authDomain: "kart-ai-914b8.firebaseapp.com",
-  projectId: "kart-ai-914b8",
-  storageBucket: "kart-ai-914b8.appspot.com",
-  messagingSenderId: "642735553778",
-  appId: "1:642735553778:web:a896f576438a75556a46b",
-  measurementId: "G-VZZ3NMJZB3",
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
-// Avoid duplicate init during hot reload
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-
-// Firestore instance
-export const db = getFirestore(app);
-
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app); 
 
 
 
