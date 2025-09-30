@@ -11,7 +11,7 @@
     "format": "eslint . --ext .js,.jsx --fix && prettier --write ."
   },
   "dependencies": {
-    "firebase": "^12.2.1",
+    "firebase": "^12.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

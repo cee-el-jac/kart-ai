@@ -2,59 +2,54 @@ import React, { useEffect, useMemo, useState } from "react";
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
 import { db } from "./firebaseClient";
 import {
-  collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  onSnapshot, serverTimestamp, query, orderBy
+  collection, doc, addDoc, getDoc, updateDoc, deleteDoc,
+  onSnapshot, serverTimestamp, query, orderBy,
 } from "firebase/firestore";
 
+/* ------------------------------------------------------------------ */
+/* Firestore Timestamp -> JS Date helpers                              */
+/* ------------------------------------------------------------------ */
+function toJsDate(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts;
+  if (typeof ts?.toDate === "function") return ts.toDate();            // Firestore Timestamp
+  if (typeof ts?.seconds === "number") return new Date(ts.seconds * 1000);
+  if (typeof ts === "number" || typeof ts === "string") return new Date(ts);
+  return null;
+}
+function fmtDate(ts) {
+  const d = toJsDate(ts);
+  return d ? d.toLocaleString() : "";
+}
 
-
-
-/* ---------------------------- styles / tokens ---------------------------- */
+/* ------------------------------------------------------------------ */
+/* styles                                                              */
+/* ------------------------------------------------------------------ */
 const S = {
   page: {
-    fontFamily:
-      "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
     color: "#111",
     background: "#fff",
     minHeight: "100vh",
   },
   container: { maxWidth: 960, margin: "0 auto", padding: "0 16px" },
   header: {
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
+    position: "sticky", top: 0, zIndex: 10,
     backdropFilter: "blur(6px)",
     background: "rgba(255,255,255,0.85)",
     borderBottom: "1px solid #e5e7eb",
     padding: "16px 12px",
-    display: "flex",
-    alignItems: "center",
+    display: "flex", alignItems: "center",
   },
-  headerRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 0",
-  },
+  headerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" },
   headLeft: { display: "flex", alignItems: "center", gap: 12 },
   logo: { width: 80, height: 80, borderRadius: 12, objectFit: "cover" },
   subtitle: { margin: 0, fontSize: 12, color: "#6b7280" },
 
   form: { display: "grid", gap: 8, gridTemplateColumns: "repeat(12, 1fr)" },
-  input: {
-    padding: "10px 12px",
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    outline: "none",
-  },
+  input: { padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 12, outline: "none" },
 
-  toolbar: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "8px 0 16px",
-  },
+  toolbar: { display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", padding: "8px 0 16px" },
   left: { display: "flex", gap: 8, alignItems: "center" },
   right: { display: "flex", gap: 8, alignItems: "center" },
 
@@ -85,30 +80,15 @@ const BTN = {
     background: BRAND.white,
     color: BRAND.text,
   },
-  primary: {
-    background: BRAND.green,
-    color: BRAND.white,
-    border: `1px solid ${BRAND.green}`,
-  },
-  secondary: {
-    background: BRAND.white,
-    color: BRAND.text,
-    border: `1px solid ${BRAND.grayBorder}`,
-  },
-  neutral: {
-    background: "#f3f4f6",
-    color: "#374151",
-    border: "1px solid #d1d5db",
-    transition: "background 0.2s ease, color 0.2s ease",
-  },
-  danger: {
-    background: BRAND.white,
-    color: BRAND.danger,
-    border: `1px solid ${BRAND.danger}`,
-  },
+  primary: { background: BRAND.green, color: BRAND.white, border: `1px solid ${BRAND.green}` },
+  secondary: { background: BRAND.white, color: BRAND.text, border: `1px solid ${BRAND.grayBorder}` },
+  neutral: { background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db" },
+  danger: { background: BRAND.white, color: BRAND.danger, border: `1px solid ${BRAND.danger}` },
 };
 
-/* --------------------------------- UI ---------------------------------- */
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
 function Header() {
   return (
     <header style={S.header}>
@@ -116,9 +96,7 @@ function Header() {
         <div style={S.headerRow}>
           <div style={S.headLeft}>
             <img src="/kart-logo.png" alt="KART AI logo" style={S.logo} />
-            <div>
-              <p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p>
-            </div>
+            <div><p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p></div>
           </div>
         </div>
       </div>
@@ -126,26 +104,15 @@ function Header() {
   );
 }
 
-/* ------------------------------ Deal card ------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Deal card                                                           */
+/* ------------------------------------------------------------------ */
 function DealCard({
   deal,
   editingId,
-  editItem,
-  editStore,
-  editStation,
-  editLocation,
-  editPrice,
-  editUnit,
-  setEditItem,
-  setEditStore,
-  setEditStation,
-  setEditLocation,
-  setEditPrice,
-  setEditUnit,
-  onStartEdit,
-  onCancelEdit,
-  onSave,
-  onDelete,
+  editItem, editStore, editStation, editLocation, editPrice, editUnit,
+  setEditItem, setEditStore, setEditStation, setEditLocation, setEditPrice, setEditUnit,
+  onStartEdit, onCancelEdit, onSave, onDelete,
 }) {
   const perKg = deal.type === "grocery"
     ? deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit)
@@ -175,8 +142,7 @@ function DealCard({
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {money(deal.price)}{" "}
-            <span style={{ ...S.muted, fontWeight: 400 }}>{deal.unit}</span>
+            {money(deal.price)} <span style={{ ...S.muted, fontWeight: 400 }}>{deal.unit}</span>
           </div>
           {deal.type === "grocery" && perKg != null && (
             <div style={S.muted}>≈ {money(perKg)} /kg · ≈ {money(perLb)} /lb</div>
@@ -184,11 +150,12 @@ function DealCard({
           {deal.type === "gas" && perL != null && (
             <div style={S.muted}>≈ {money(perL)} /L · ≈ {money(perGal)} /gal</div>
           )}
-          <div style={S.muted}>{new Date(deal.addedAt).toLocaleString()}</div>
+          <div style={{ color: "#667", fontSize: 12 }}>
+            {fmtDate(deal.updatedAt || deal.createdAt)}
+          </div>
         </div>
       </div>
 
-      {/* Editing UI */}
       {isEditing ? (
         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -252,7 +219,7 @@ function DealCard({
           >
             Edit
           </button>
-          <button onClick={() => onDelete(deal.id)} style={{ ...BTN.base, ...BTN.danger }}>
+          <button onClick={() => onDelete(deal.id)} style={{ ...BTN.base, ...BTN.danger }} title="Delete">
             Delete
           </button>
         </div>
@@ -261,7 +228,9 @@ function DealCard({
   );
 }
 
-/* ----------------------------- Deals list ------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Deals list                                                          */
+/* ------------------------------------------------------------------ */
 function DealsList(props) {
   const { deals } = props;
   if (!deals.length) {
@@ -276,40 +245,28 @@ function DealsList(props) {
   return (
     <div style={{ ...S.container, padding: "0 16px 24px" }}>
       <div style={S.list}>
-        {deals.map((d) => (
-          <DealCard key={d.id} deal={d} {...props} />
-        ))}
+        {deals.map((d) => <DealCard key={d.id} deal={d} {...props} />)}
       </div>
     </div>
   );
 }
 
-/* ----------------------------- AddDeal form ---------------------------- */
+/* ------------------------------------------------------------------ */
+/* Add Deal form                                                       */
+/* ------------------------------------------------------------------ */
 function AddDealForm({ onAdd, forcedType }) {
   const [form, setForm] = useState({
-    type: "grocery",
-    item: "",
-    store: "",
-    station: "",
-    location: "",
-    price: "",
-    unit: "/ea",
+    type: "grocery", item: "", store: "", station: "", location: "", price: "", unit: "/ea",
   });
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (forcedType === "grocery" || forcedType === "gas") {
-      setForm((f) => ({
-        ...f,
-        type: forcedType,
-        unit: forcedType === "grocery" ? "/ea" : "/L",
-      }));
+      setForm((f) => ({ ...f, type: forcedType, unit: forcedType === "grocery" ? "/ea" : "/L" }));
     }
   }, [forcedType]);
 
-  const unitOptions = form.type === "grocery"
-    ? ["/ea", "/dozen", "/lb", "/kg", "/100g"]
-    : ["/L", "/gal"];
+  const unitOptions = form.type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -317,271 +274,160 @@ function AddDealForm({ onAdd, forcedType }) {
   }
 
   async function handleSubmit(e) {
-  e.preventDefault();
-  setError("");
-
-  // basic validation (same rules you already use)
-  if (!form.item?.trim()) return setError("Item name is required.");
-  if (form.type === "grocery" && !form.store?.trim()) {
-    return setError("Store is required.");
-  }
-  if (form.type === "gas" && !form.station?.trim()) {
-    return setError("Station is required.");
-  }
-  const priceNum = Number(form.price);
-  if (!isFinite(priceNum) || priceNum <= 0) {
-    return setError("Enter a valid price.");
-  }
-
-  // shape the document for Firestore (timestamps are added in createDeal)
-  const toSave = {
-    type: form.type,                  // "grocery" | "gas"
-    item: form.item?.trim() || "",
-    store: form.store?.trim() || "",
-    station: form.station?.trim() || "",
-    location: form.location?.trim() || "",
-    unit: form.unit,                  // "/ea", "/L", etc.
-    price: priceNum,
-
-    // keep your normalized fields if you already compute them in state
-    normalizedPerKg: form.normalizedPerKg ?? null,
-    normalizedPerL:  form.normalizedPerL  ?? null,
-  };
-
-  try {
-    // 🔗 write to Firestore
-      await onAdd(toSave);           // << use the prop from App.jsx
-  // clear the form on success
-  setForm({
-    type: "grocery",
-    item: "",
-    store: "",
-    station: "",
-    location: "",
-    unit: "/ea",
-    price: "",
-    });
+    e.preventDefault();
     setError("");
-  } catch (err) {
-    console.error("Error adding deal:", err);
-    setError("Failed to save. Try again.");
-  }
-}
 
+    if (!form.item?.trim()) return setError("Item name is required.");
+    if (form.type === "grocery" && !form.store?.trim()) return setError("Store is required.");
+    if (form.type === "gas" && !form.station?.trim()) return setError("Station is required.");
+
+    const priceNum = Number(form.price);
+    if (!isFinite(priceNum) || priceNum <= 0) return setError("Enter a valid price.");
+
+    const toSave = {
+      type: form.type,
+      item: form.item.trim(),
+      store: form.store.trim(),
+      station: form.station.trim(),
+      location: form.location.trim(),
+      unit: form.unit,
+      price: priceNum,
+      normalizedPerKg: form.normalizedPerKg ?? null,
+      normalizedPerL: form.normalizedPerL ?? null,
+    };
+
+    try {
+      await onAdd(toSave);
+      setForm({
+        type: forcedType === "gas" ? "gas" : "grocery",
+        item: "", store: "", station: "", location: "", price: "",
+        unit: forcedType === "gas" ? "/L" : "/ea",
+      });
+    } catch (err) {
+      console.error("Error adding deal:", err);
+      setError("Failed to save. Try again.");
+    }
+  }
 
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
-        
         <input
-          name="item"
-          value={form.item}
-          onChange={handleChange}
+          name="item" value={form.item} onChange={handleChange}
           placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
           style={{ ...S.input, gridColumn: "span 3" }}
         />
-
         {form.type === "grocery" ? (
-          <input
-            name="store"
-            value={form.store}
-            onChange={handleChange}
-            placeholder="Store (e.g., Costco)"
-            style={{ ...S.input, gridColumn: "span 2" }}
-          />
+          <input name="store" value={form.store} onChange={handleChange} placeholder="Store (e.g., Costco)" style={{ ...S.input, gridColumn: "span 2" }} />
         ) : (
-          <input
-            name="station"
-            value={form.station}
-            onChange={handleChange}
-            placeholder="Station (e.g., Shell)"
-            style={{ ...S.input, gridColumn: "span 2" }}
-          />
+          <input name="station" value={form.station} onChange={handleChange} placeholder="Station (e.g., Shell)" style={{ ...S.input, gridColumn: "span 2" }} />
         )}
-
-        <input
-          name="location"
-          value={form.location}
-          onChange={handleChange}
-          placeholder="Location (City, State/Province)"
-          style={{ ...S.input, gridColumn: "span 3" }}
-        />
-
-        <input
-          name="price"
-          value={form.price}
-          onChange={handleChange}
-          placeholder="Price (e.g., 4.99)"
-          style={{ ...S.input, gridColumn: "span 1" }}
-        />
-
-        <select
-          name="unit"
-          value={form.unit}
-          onChange={handleChange}
-          style={{ ...S.input, gridColumn: "span 1" }}
-        >
-          {unitOptions.map((u) => (
-            <option key={u} value={u}>{u}</option>
-          ))}
+        <input name="location" value={form.location} onChange={handleChange} placeholder="Location (City, State/Province)" style={{ ...S.input, gridColumn: "span 3" }} />
+        <input name="price" value={form.price} onChange={handleChange} placeholder="Price (e.g., 4.99)" style={{ ...S.input, gridColumn: "span 1" }} />
+        <select name="unit" value={form.unit} onChange={handleChange} style={{ ...S.input, gridColumn: "span 1" }}>
+          {unitOptions.map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
       </div>
-
       {error && <p style={S.error}>{error}</p>}
-
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
         <button
-  type="button"
-  onClick={() => {
-    setForm({
-      type: forcedType === "grocery" || forcedType === "gas" ? forcedType : "grocery",
-      item: "",
-      store: "",
-      station: "",
-      location: "",
-      price: "",
-      unit: forcedType === "gas" ? "/L" : "/ea",
-    });
-  }}
-  style={{ ...BTN.base, ...BTN.neutral }}
-  onMouseEnter={(e) => {
-    e.currentTarget.style.background = "#e5e7eb"; // hover gray
-    e.currentTarget.style.color = "#111";         // darker text
-  }}
-  onMouseLeave={(e) => {
-    e.currentTarget.style.background = "#f3f4f6"; // neutral gray
-    e.currentTarget.style.color = "#374151";      // original neutral text
-  }}
->
-  Reset
-</button>
-
-
+          type="button"
+          onClick={() =>
+            setForm({
+              type: forcedType === "gas" ? "gas" : "grocery",
+              item: "", store: "", station: "", location: "", price: "",
+              unit: forcedType === "gas" ? "/L" : "/ea",
+            })
+          }
+          style={{ ...BTN.base, ...BTN.neutral }}
+        >
+          Reset
+        </button>
         <button type="submit" style={{ ...BTN.base, ...BTN.primary }}>Add</button>
       </div>
     </form>
   );
 }
 
-/* --------------------------------- App --------------------------------- */
+/* ------------------------------------------------------------------ */
+/* App                                                                 */
+/* ------------------------------------------------------------------ */
 export default function App() {
-  /* deals state (persisted) */
+  // persist deals to localStorage
   const [deals, setDeals] = useState(() => {
-    try {
-      const raw = localStorage.getItem("kart-deals");
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+    try { return JSON.parse(localStorage.getItem("kart-deals") || "[]"); } catch { return []; }
   });
+  useEffect(() => { try { localStorage.setItem("kart-deals", JSON.stringify(deals)); } catch {} }, [deals]);
 
-   const dealsCol = collection(db, "deals"); 
+  const dealsCol = collection(db, "deals");
 
-   // --- Firestore helper functions ---
-
-// Add a new deal
-async function createDeal(deal) {
-  try {
-    await addDoc(dealsCol, {
-      ...deal,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (err) {
-    console.error("Error adding deal: ", err);
+  /* -------- Firestore helpers -------- */
+  async function createDeal(deal) {
+    try {
+      const ref = await addDoc(dealsCol, {
+        ...deal,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      // Optional read-back (not required for UI, onSnapshot will deliver it)
+      await getDoc(ref);
+      return ref.id;
+    } catch (err) {
+      console.error("[createDeal] FAILED:", err?.code, err?.message, err);
+      throw err;
+    }
   }
-}
 
-// Update an existing deal
-async function updateDeal(id, updates) {
-  try {
+  async function updateDealFS(id, updates) {
     const ref = doc(dealsCol, id);
-    await updateDoc(ref, {
-      ...updates,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (err) {
-    console.error("Error updating deal: ", err);
+    await updateDoc(ref, { ...updates, updatedAt: serverTimestamp() });
   }
-}
 
-// Delete a deal
-async function removeDeal(id) {
-  try {
+  async function removeDeal(id) {
     const ref = doc(dealsCol, id);
     await deleteDoc(ref);
-  } catch (err) {
-    console.error("Error deleting deal: ", err);
   }
-}
 
-
-
-
-
+  /* -------- Live subscription to Firestore -------- */
   useEffect(() => {
-    try {
-      localStorage.setItem("kart-deals", JSON.stringify(deals));
-    } catch {}
-  }, [deals]);
+    const qy = query(dealsCol, orderBy("updatedAt", "desc"));
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const list = snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            type: data.type ?? "grocery",
+            item: data.item ?? "",
+            store: data.store ?? "",
+            station: data.station ?? "",
+            location: data.location ?? "",
+            unit: data.unit ?? "/ea",
+            price: data.price ?? 0,
+            normalizedPerKg: data.normalizedPerKg ?? null,
+            normalizedPerL: data.normalizedPerL ?? null,
+            // convert Firestore Timestamp -> JS Date for rendering/sorting
+            createdAt: toJsDate(data.createdAt) ?? null,
+            updatedAt: toJsDate(data.updatedAt) ?? null,
+          };
+        });
+        setDeals(list);
+      },
+      (err) => console.error("onSnapshot error:", err)
+    );
+    return () => unsub();
+  }, []); // subscribe once
 
-  // Live subscribe to Firestore "deals"
-useEffect(() => {
-  // open a real-time listener
-  const unsubscribe = onSnapshot(
-    dealsCol,
-    (snap) => {
-      // if there are no docs yet, keep whatever we already have (localStorage)
-      if (snap.empty) return;
-
-      const fromDb = snap.docs.map((doc) => {
-        const d = doc.data();
-        return {
-          // Firestore id
-          id: doc.id,
-
-          // fields (use sensible fallbacks to match your existing shape)
-          type: d.type ?? "grocery",          // "grocery" | "gas"
-          item: d.item ?? "",
-          store: d.store ?? "",
-          station: d.station ?? "",
-          location: d.location ?? "",
-          unit: d.unit ?? "/ea",
-          price: d.price ?? 0,
-
-          // normalized fields you already compute/use
-          normalizedPerKg: d.normalizedPerKg ?? null,
-          normalizedPerL:  d.normalizedPerL  ?? null,
-
-          // timestamps (ok if missing)
-          createdAt: d.createdAt?.toMillis?.() ?? null,
-          updatedAt: d.updatedAt?.toMillis?.() ?? null,
-        };
-      });
-
-      // replace UI state; your existing "save to localStorage when deals changes"
-      // effect will persist this automatically.
-      setDeals(fromDb);
-    },
-    (err) => {
-      console.error("Firestore onSnapshot error:", err);
-    }
-  );
-
-  // cleanup on unmount/hot-reload
-  return () => unsubscribe();
-}, []); // ← no deps: subscribe once
-
-
-  /* UI state (persisted) */
-  const [query, setQuery] = useState(() => localStorage.getItem("kart-query") || "");
+  /* -------- Search / sort UI state -------- */
+  const [queryText, setQueryText] = useState(() => localStorage.getItem("kart-query") || "");
   const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortby") || "newest");
   const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
-  useEffect(() => { try { localStorage.setItem("kart-query", query); } catch {} }, [query]);
+  useEffect(() => { try { localStorage.setItem("kart-query", queryText); } catch {} }, [queryText]);
   useEffect(() => { try { localStorage.setItem("kart-sortby", sortBy); } catch {} }, [sortBy]);
   useEffect(() => { try { localStorage.setItem("kart-typeFilter", typeFilter); } catch {} }, [typeFilter]);
 
-  /* inline edit state */
+  /* -------- Inline edit state -------- */
   const [editingId, setEditingId] = useState(null);
   const [editItem, setEditItem] = useState("");
   const [editStore, setEditStore] = useState("");
@@ -590,13 +436,18 @@ useEffect(() => {
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
 
-  /* handlers */
-  function handleAdd(newDeal) {
-    setDeals((d) => [newDeal, ...d]);
+  /* -------- Handlers -------- */
+  async function handleAdd(newDeal) {
+    try {
+      await createDeal(newDeal); // Firestore writes; UI updates via onSnapshot
+    } catch (err) {
+      console.error("add failed:", err);
+    }
   }
-  function handleDelete(id) {
-    setDeals((d) => d.filter((x) => x.id !== id));
-    if (id === editingId) handleCancelEdit(); // safety
+
+  async function handleDelete(id) {
+    await removeDeal(id);
+    if (id === editingId) handleCancelEdit();
   }
 
   function handleStartEdit(deal) {
@@ -619,7 +470,7 @@ useEffect(() => {
     setEditUnit("/ea");
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!editingId) return;
 
     const newItem = editItem.trim();
@@ -632,107 +483,84 @@ useEffect(() => {
     if (!newItem) return;
     if (!Number.isFinite(newPrice) || newPrice <= 0) return;
 
-    setDeals((prev) =>
-      prev.map((d) => {
-        if (d.id !== editingId) return d;
+    const current = deals.find((d) => d.id === editingId);
+    let normalizedPerKg = null;
+    let normalizedPerL = null;
+    if (current?.type === "grocery") normalizedPerKg = toPerKg(newPrice, newUnit);
+    if (current?.type === "gas") normalizedPerL = toPerL(newPrice, newUnit);
 
-        let normalizedPerKg = d.normalizedPerKg ?? null;
-        let normalizedPerL = d.normalizedPerL ?? null;
-
-        if (d.type === "grocery") {
-          normalizedPerKg = toPerKg(newPrice, newUnit);
-        } else if (d.type === "gas") {
-          normalizedPerL = toPerL(newPrice, newUnit);
-        }
-
-        return {
-          ...d,
-          item: newItem,
-          store: d.type === "grocery" ? newStore : "",
-          station: d.type === "gas" ? newStation : "",
-          location: newLocation,
-          price: newPrice,
-          unit: newUnit,
-          normalizedPerKg,
-          normalizedPerL,
-        };
-      })
-    );
+    await updateDealFS(editingId, {
+      item: newItem,
+      store: newStore,
+      station: newStation,
+      location: newLocation,
+      price: newPrice,
+      unit: newUnit,
+      normalizedPerKg,
+      normalizedPerL,
+    });
 
     handleCancelEdit();
   }
 
-  /* filter + sort */
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = queryText.trim().toLowerCase();
     let out = [...deals];
 
     if (typeFilter !== "all") out = out.filter((d) => d.type === typeFilter);
 
     if (q) {
       out = out.filter((d) =>
-        [d.item, d.store, d.station, d.location].some((v) =>
-          (v || "").toLowerCase().includes(q)
-        )
+        [d.item, d.store, d.station, d.location].some((v) => (v || "").toLowerCase().includes(q))
       );
     }
 
     switch (sortBy) {
-      case "price-asc": {
+      case "price-asc":
         out.sort((a, b) => {
-          const aNorm =
-            a.type === "grocery"
-              ? a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price
-              : a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price;
-
-          const bNorm =
-            b.type === "grocery"
-              ? b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price
-              : b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price;
-
+          const aNorm = a.type === "grocery"
+            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
+            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
+          const bNorm = b.type === "grocery"
+            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
+            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
           return (aNorm ?? Infinity) - (bNorm ?? Infinity);
         });
         break;
-      }
-      case "price-desc": {
+      case "price-desc":
         out.sort((a, b) => {
-          const aNorm =
-            a.type === "grocery"
-              ? a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price
-              : a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price;
-
-          const bNorm =
-            b.type === "grocery"
-              ? b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price
-              : b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price;
-
+          const aNorm = a.type === "grocery"
+            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
+            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
+          const bNorm = b.type === "grocery"
+            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
+            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
           return (bNorm ?? -Infinity) - (aNorm ?? -Infinity);
         });
         break;
-      }
-      case "alpha": {
+      case "alpha":
         out.sort((a, b) => (a.item || "").localeCompare(b.item || ""));
         break;
-      }
       case "newest":
-      default: {
-        out.sort((a, b) => b.addedAt - a.addedAt);
+      default:
+        out.sort((a, b) => {
+          const aT = (a.updatedAt || a.createdAt || 0)?.valueOf?.() ?? 0;
+          const bT = (b.updatedAt || b.createdAt || 0)?.valueOf?.() ?? 0;
+          return bT - aT;
+        });
         break;
-      }
     }
 
     return out;
-  }, [deals, query, sortBy, typeFilter]);
+  }, [deals, queryText, sortBy, typeFilter]);
 
-  /* forced type for AddDealForm based on filter */
   const forcedType = typeFilter === "grocery" || typeFilter === "gas" ? typeFilter : null;
 
-  /* top Reset for search/filters/sort + inline-edit */
   function handleResetAll() {
-    setQuery("");
+    setQueryText("");
     setSortBy("newest");
     setTypeFilter("all");
-    handleCancelEdit(); // also clears edit UI
+    handleCancelEdit();
   }
 
   return (
@@ -745,83 +573,54 @@ useEffect(() => {
             <input
               style={{ ...S.input, width: 360 }}
               placeholder="Search items, stores, stations, locations…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              value={queryText}
+              onChange={(e) => setQueryText(e.target.value)}
             />
             <button
-  onClick={() => setTypeFilter("grocery")}
-  style={{
-    ...BTN.base,
-    ...(typeFilter === "grocery" ? BTN.primary : BTN.secondary),
-          width: 40,
-      height: 40,
-      padding: 0,
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      // thicker green outline when active
-      border: `${
-        typeFilter === "grocery" ? 2 : 1
-      }px solid ${typeFilter === "grocery" ? BRAND.green : BRAND.grayBorder}`,
-      background: BRAND.white,        // keep white so green PNG shows
-  }}
-  title="Show grocery deals"
->
-  <img src="/icons/cart_icon.png" alt="" style={{ width: 18, height: 18 }} />
-</button>
-
-<button
-  onClick={() => setTypeFilter("gas")}
-  style={{
-    ...BTN.base,
-      ...BTN.secondary,
-      width: 40,
-      height: 40,
-      padding: 0,
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      border: `${
-        typeFilter === "gas" ? 2 : 1
-      }px solid ${typeFilter === "gas" ? BRAND.green : BRAND.grayBorder}`,
-      background: BRAND.white,
-  }}
-  title="Show gas deals"
->
-  <img src="/icons/gas_icon.png" alt="" style={{ width: 18, height: 18 }} />
-</button>
-
-<button
-  onClick={() => setTypeFilter("all")}
-  style={{
-    ...BTN.base,
-    ...(typeFilter === "all" ? BTN.primary : BTN.secondary),
-  }}
-  title="Show all deals"
->
-  All
-</button>
-            
+              onClick={() => setTypeFilter("grocery")}
+              style={{
+                ...BTN.base,
+                ...(typeFilter === "grocery" ? BTN.primary : BTN.secondary),
+                width: 40, height: 40, padding: 0,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                border: `${typeFilter === "grocery" ? 2 : 1}px solid ${typeFilter === "grocery" ? BRAND.green : BRAND.grayBorder}`,
+                background: BRAND.white,
+              }}
+              title="Show grocery deals"
+            >
+              <img src="/icons/cart_icon.png" alt="" style={{ width: 18, height: 18 }} />
+            </button>
+            <button
+              onClick={() => setTypeFilter("gas")}
+              style={{
+                ...BTN.base, ...BTN.secondary,
+                width: 40, height: 40, padding: 0,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                border: `${typeFilter === "gas" ? 2 : 1}px solid ${typeFilter === "gas" ? BRAND.green : BRAND.grayBorder}`,
+                background: BRAND.white,
+              }}
+              title="Show gas deals"
+            >
+              <img src="/icons/gas_icon.png" alt="" style={{ width: 18, height: 18 }} />
+            </button>
+            <button
+              onClick={() => setTypeFilter("all")}
+              style={{ ...BTN.base, ...(typeFilter === "all" ? BTN.primary : BTN.secondary) }}
+              title="Show all deals"
+            >
+              All
+            </button>
           </div>
 
           <div style={S.right}>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              style={S.input}
-              title="Sort"
-            >
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.input} title="Sort">
               <option value="newest">Newest</option>
               <option value="price-asc">Price (Low → High)</option>
               <option value="price-desc">Price (High → Low)</option>
               <option value="alpha">A → Z</option>
             </select>
 
-            <button
-              onClick={handleResetAll}
-              style={{ ...BTN.base, ...BTN.neutral }}
-              title="Clear search, filters, sort"
-            >
+            <button onClick={handleResetAll} style={{ ...BTN.base, ...BTN.neutral }} title="Clear search, filters, sort">
               Reset
             </button>
           </div>
@@ -853,10 +652,7 @@ useEffect(() => {
       />
     </div>
   );
-}
-
-
-
+} 
 
 
 
