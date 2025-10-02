@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import OCRScan from "./components/OCRScan"; 
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
 import { db } from "./firebaseClient";
 import {
@@ -650,6 +651,13 @@ export default function App() {
         onCancelEdit={handleCancelEdit}
         onSave={handleSave}
       />
+      {/* OCR Scan Section */}
+       <div style={{ ...S.container, padding: "16px 0" }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+          Smart Assist – OCR
+        </h2>
+        <OCRScan />
+      </div>
     </div>
   );
 } 
