@@ -255,7 +255,7 @@ function DealsList(props) {
 /* ------------------------------------------------------------------ */
 /* Add Deal form                                                       */
 /* ------------------------------------------------------------------ */
-function AddDealForm({ onAdd, forcedType }) {
+function AddDealForm({ onAdd, forcedType, prefill }) {
   const [form, setForm] = useState({
     type: "grocery", item: "", store: "", station: "", location: "", price: "", unit: "/ea",
   });
@@ -273,7 +273,16 @@ function AddDealForm({ onAdd, forcedType }) {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
   }
-
+   // Autofill form fields if OCRScan provides draft data
+  useEffect(() => {
+    if (prefill?.item || prefill?.price) {
+      setForm((f) => ({
+        ...f,
+        item: prefill.item || f.item,
+        price: prefill.price || f.price,
+      }));
+    }
+}, [prefill]);  
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
@@ -436,6 +445,9 @@ export default function App() {
   const [editLocation, setEditLocation] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
+
+      // --- Smart Assist (OCR) draft coming from OCRScan ---
+    const [ocrDraft, setOcrDraft] = useState(null); 
 
   /* -------- Handlers -------- */
   async function handleAdd(newDeal) {
@@ -627,8 +639,27 @@ export default function App() {
           </div>
         </div>
       </div>
+      {/* Smart Assist — OCR */}
+      <div style={{ ...S.container, padding: "0 16px 12px" }}>
+        <h4 style={{ margin: "12px 0 8px", color: "#374151", fontWeight: 600 }}>
+          Smart Assist — OCR
+        </h4>
 
-      <AddDealForm onAdd={handleAdd} forcedType={forcedType} />
+        <OCRScan
+          onPick={({ item, price }) => {
+            setOcrDraft({
+              item: item || "",
+              price: price || "",
+            });
+          }}
+        />
+      </div> 
+
+      <AddDealForm 
+        onAdd={handleAdd} 
+        forcedType={forcedType}
+        prefill={ocrDraft}  
+      />
 
       <DealsList
         deals={filtered}
