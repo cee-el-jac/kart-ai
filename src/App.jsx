@@ -639,21 +639,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {/* Smart Assist — OCR */}
-      <div style={{ ...S.container, padding: "0 16px 12px" }}>
-        <h4 style={{ margin: "12px 0 8px", color: "#374151", fontWeight: 600 }}>
-          Smart Assist — OCR
-        </h4>
-
-        <OCRScan
-          onPick={({ item, price }) => {
-            setOcrDraft({
-              item: item || "",
-              price: price || "",
-            });
-          }}
-        />
-      </div> 
+      
 
       <AddDealForm 
         onAdd={handleAdd} 
