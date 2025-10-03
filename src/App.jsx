@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import OCRScan from "./components/OCRScan"; 
+import OCRScan from "./components/OCRScan";
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
 import { db } from "./firebaseClient";
 import {
@@ -125,6 +125,11 @@ function DealCard({
     : null;
   const perGal = deal.type === "gas" && perL != null ? toPerGal(perL, "/L") : null;
 
+  // Multi-buy display (saved as originalMultiBuy in Firestore)
+  const qty   = Number(deal.originalMultiBuy?.qty);
+  const total = Number(deal.originalMultiBuy?.total);
+  const hasMulti = Number.isFinite(qty) && qty >= 2 && Number.isFinite(total) && total > 0;
+
   const isEditing = editingId === deal.id;
 
   return (
@@ -143,8 +148,21 @@ function DealCard({
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
-            {money(deal.price)} <span style={{ ...S.muted, fontWeight: 400 }}>{deal.unit}</span>
+            {hasMulti ? (
+              <>
+                {qty} for {money(total)}{" "}
+                <span style={{ ...S.muted, fontWeight: 400 }}>
+                  (≈ {money(total / Math.max(qty, 1))} each)
+                </span>
+              </>
+            ) : (
+              <>
+                {money(deal.price)}{" "}
+                <span style={{ ...S.muted, fontWeight: 400 }}>{deal.unit}</span>
+              </>
+            )}
           </div>
+
           {deal.type === "grocery" && perKg != null && (
             <div style={S.muted}>≈ {money(perKg)} /kg · ≈ {money(perLb)} /lb</div>
           )}
@@ -255,64 +273,125 @@ function DealsList(props) {
 /* ------------------------------------------------------------------ */
 /* Add Deal form                                                       */
 /* ------------------------------------------------------------------ */
-function AddDealForm({ onAdd, forcedType, prefill }) {
+function AddDealForm({ onAdd, forcedType }) {
   const [form, setForm] = useState({
-    type: "grocery", item: "", store: "", station: "", location: "", price: "", unit: "/ea",
+    type: "grocery",
+    item: "",
+    store: "",
+    station: "",
+    location: "",
+    price: "",      // single-unit price (used when NOT multi-buy)
+    unit: "/ea",
+
+    // NEW: multi-buy fields (hidden unless enabled)
+    multiEnabled: false,
+    multiQty: "",   // e.g., 2, 3, 5
+    multiTotal: "", // e.g., 5.00, 10.00
   });
   const [error, setError] = useState("");
 
+  // Keep your forcedType behavior (gas/grocery default + unit)
   useEffect(() => {
     if (forcedType === "grocery" || forcedType === "gas") {
-      setForm((f) => ({ ...f, type: forcedType, unit: forcedType === "grocery" ? "/ea" : "/L" }));
+      setForm((f) => ({
+        ...f,
+        type: forcedType,
+        unit: forcedType === "grocery" ? "/ea" : "/L",
+      }));
     }
   }, [forcedType]);
 
-  const unitOptions = form.type === "grocery" ? ["/ea", "/dozen", "/lb", "/kg", "/100g"] : ["/L", "/gal"];
+  const unitOptions =
+    form.type === "grocery"
+      ? ["/ea", "/dozen", "/lb", "/kg", "/100g"]
+      : ["/L", "/gal"];
 
   function handleChange(e) {
-    const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
-  }
-   // Autofill form fields if OCRScan provides draft data
-  useEffect(() => {
-    if (prefill?.item || prefill?.price) {
-      setForm((f) => ({
-        ...f,
-        item: prefill.item || f.item,
-        price: prefill.price || f.price,
-      }));
+    const { name, value, type, checked } = e.target;
+    if (type === "checkbox") {
+      setForm((f) => ({ ...f, [name]: checked }));
+    } else {
+      setForm((f) => ({ ...f, [name]: value }));
     }
-}, [prefill]);  
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
+    // basic validation
     if (!form.item?.trim()) return setError("Item name is required.");
-    if (form.type === "grocery" && !form.store?.trim()) return setError("Store is required.");
-    if (form.type === "gas" && !form.station?.trim()) return setError("Station is required.");
+    if (form.type === "grocery" && !form.store?.trim()) {
+      return setError("Store is required.");
+    }
+    if (form.type === "gas" && !form.station?.trim()) {
+      return setError("Station is required.");
+    }
 
-    const priceNum = Number(form.price);
-    if (!isFinite(priceNum) || priceNum <= 0) return setError("Enter a valid price.");
+    // ----- multi-buy vs single price logic -----
+    const isMulti = !!form.multiEnabled;
+    const qtyNum = Number(form.multiQty);
+    const totalNum = Number(form.multiTotal);
+
+    if (isMulti) {
+      if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+        return setError("Enter a valid multi-buy quantity (e.g., 2).");
+      }
+      if (!Number.isFinite(totalNum) || totalNum <= 0) {
+        return setError("Enter a valid multi-buy total (e.g., 5.00).");
+      }
+    }
+
+    let priceNum = null; // per-unit price
+    let originalMultiBuy = null;
+
+    if (isMulti) {
+      const perUnit = totalNum / qtyNum;
+      if (!isFinite(perUnit) || perUnit <= 0) {
+        return setError("Multi-buy values are invalid.");
+      }
+      priceNum = Number(perUnit.toFixed(4));
+      originalMultiBuy = { qty: qtyNum, total: totalNum, perUnit: priceNum };
+    } else {
+      const p = Number(form.price);
+      if (!isFinite(p) || p <= 0) {
+        return setError("Enter a valid price.");
+      }
+      priceNum = p;
+    }
 
     const toSave = {
       type: form.type,
-      item: form.item.trim(),
-      store: form.store.trim(),
-      station: form.station.trim(),
-      location: form.location.trim(),
+      item: form.item?.trim() || "",
+      store: form.store?.trim() || "",
+      station: form.station?.trim() || "",
+      location: form.location?.trim() || "",
       unit: form.unit,
       price: priceNum,
       normalizedPerKg: form.normalizedPerKg ?? null,
-      normalizedPerL: form.normalizedPerL ?? null,
+      normalizedPerL:  form.normalizedPerL  ?? null,
+      originalMultiBuy, // <-- keep bundle
     };
 
     try {
       await onAdd(toSave);
+      // reset
       setForm({
-        type: forcedType === "gas" ? "gas" : "grocery",
-        item: "", store: "", station: "", location: "", price: "",
+        type:
+          forcedType === "grocery" || forcedType === "gas"
+            ? forcedType
+            : "grocery",
+        item: "",
+        store: "",
+        station: "",
+        location: "",
+        price: "",
         unit: forcedType === "gas" ? "/L" : "/ea",
+        multiEnabled: false,
+        multiQty: "",
+        multiTotal: "",
       });
+      setError("");
     } catch (err) {
       console.error("Error adding deal:", err);
       setError("Failed to save. Try again.");
@@ -322,37 +401,129 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
+        {/* Item */}
         <input
-          name="item" value={form.item} onChange={handleChange}
+          name="item"
+          value={form.item}
+          onChange={handleChange}
           placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
           style={{ ...S.input, gridColumn: "span 3" }}
         />
+
+        {/* Store / Station */}
         {form.type === "grocery" ? (
-          <input name="store" value={form.store} onChange={handleChange} placeholder="Store (e.g., Costco)" style={{ ...S.input, gridColumn: "span 2" }} />
+          <input
+            name="store"
+            value={form.store}
+            onChange={handleChange}
+            placeholder="Store (e.g., Costco)"
+            style={{ ...S.input, gridColumn: "span 2" }}
+          />
         ) : (
-          <input name="station" value={form.station} onChange={handleChange} placeholder="Station (e.g., Shell)" style={{ ...S.input, gridColumn: "span 2" }} />
+          <input
+            name="station"
+            value={form.station}
+            onChange={handleChange}
+            placeholder="Station (e.g., Shell)"
+            style={{ ...S.input, gridColumn: "span 2" }}
+          />
         )}
-        <input name="location" value={form.location} onChange={handleChange} placeholder="Location (City, State/Province)" style={{ ...S.input, gridColumn: "span 3" }} />
-        <input name="price" value={form.price} onChange={handleChange} placeholder="Price (e.g., 4.99)" style={{ ...S.input, gridColumn: "span 1" }} />
-        <select name="unit" value={form.unit} onChange={handleChange} style={{ ...S.input, gridColumn: "span 1" }}>
-          {unitOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+
+        {/* Location */}
+        <input
+          name="location"
+          value={form.location}
+          onChange={handleChange}
+          placeholder="Location (City, State/Province)"
+          style={{ ...S.input, gridColumn: "span 3" }}
+        />
+
+        {/* Unit */}
+        <select
+          name="unit"
+          value={form.unit}
+          onChange={handleChange}
+          style={{ ...S.input, gridColumn: "span 1" }}
+        >
+          {unitOptions.map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
         </select>
+
+        {/* Toggle: Multi-buy? */}
+        <label style={{ display: "flex", alignItems: "center", gap: 8, gridColumn: "span 3", fontSize: 14 }}>
+          <input
+            type="checkbox"
+            name="multiEnabled"
+            checked={form.multiEnabled}
+            onChange={handleChange}
+          />
+          Multi-buy deal? (e.g., 2 for $5)
+        </label>
+
+        {/* Multi-buy inputs (shown only if enabled) */}
+        {form.multiEnabled ? (
+          <>
+            <input
+              name="multiQty"
+              value={form.multiQty}
+              onChange={handleChange}
+              placeholder="Qty (e.g., 2)"
+              style={{ ...S.input, gridColumn: "span 1" }}
+            />
+            <input
+              name="multiTotal"
+              value={form.multiTotal}
+              onChange={handleChange}
+              placeholder="Bundle total (e.g., 5.00)"
+              style={{ ...S.input, gridColumn: "span 2" }}
+            />
+            {Number(form.multiQty) > 0 && Number(form.multiTotal) > 0 ? (
+              <div style={{ alignSelf: "center", fontSize: 12, color: "#6b7280", gridColumn: "span 2" }}>
+                ≈ {(Number(form.multiTotal) / Number(form.multiQty)).toFixed(2)} per unit
+              </div>
+            ) : (
+              <div style={{ gridColumn: "span 2" }} />
+            )}
+          </>
+        ) : (
+          <input
+            name="price"
+            value={form.price}
+            onChange={handleChange}
+            placeholder="Price (e.g., 4.99)"
+            style={{ ...S.input, gridColumn: "span 1" }}
+          />
+        )}
       </div>
+
       {error && <p style={S.error}>{error}</p>}
+
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
             setForm({
-              type: forcedType === "gas" ? "gas" : "grocery",
-              item: "", store: "", station: "", location: "", price: "",
+              type:
+                forcedType === "grocery" || forcedType === "gas"
+                  ? forcedType
+                  : "grocery",
+              item: "",
+              store: "",
+              station: "",
+              location: "",
+              price: "",
               unit: forcedType === "gas" ? "/L" : "/ea",
-            })
-          }
+              multiEnabled: false,
+              multiQty: "",
+              multiTotal: "",
+            });
+          }}
           style={{ ...BTN.base, ...BTN.neutral }}
         >
           Reset
         </button>
+
         <button type="submit" style={{ ...BTN.base, ...BTN.primary }}>Add</button>
       </div>
     </form>
@@ -379,7 +550,6 @@ export default function App() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // Optional read-back (not required for UI, onSnapshot will deliver it)
       await getDoc(ref);
       return ref.id;
     } catch (err) {
@@ -417,7 +587,11 @@ export default function App() {
             price: data.price ?? 0,
             normalizedPerKg: data.normalizedPerKg ?? null,
             normalizedPerL: data.normalizedPerL ?? null,
-            // convert Firestore Timestamp -> JS Date for rendering/sorting
+
+            // >>> IMPORTANT: bring originalMultiBuy from Firestore <<<
+            originalMultiBuy: data.originalMultiBuy ?? null,
+
+            // convert Firestore Timestamp -> JS Date
             createdAt: toJsDate(data.createdAt) ?? null,
             updatedAt: toJsDate(data.updatedAt) ?? null,
           };
@@ -446,8 +620,8 @@ export default function App() {
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
 
-      // --- Smart Assist (OCR) draft coming from OCRScan ---
-    const [ocrDraft, setOcrDraft] = useState(null); 
+  // --- Smart Assist (OCR) draft coming from OCRScan (future prefill) ---
+  const [ocrDraft, setOcrDraft] = useState(null);
 
   /* -------- Handlers -------- */
   async function handleAdd(newDeal) {
@@ -511,6 +685,7 @@ export default function App() {
       unit: newUnit,
       normalizedPerKg,
       normalizedPerL,
+      // NOTE: leaving originalMultiBuy unchanged during inline edit for now
     });
 
     handleCancelEdit();
@@ -639,12 +814,11 @@ export default function App() {
           </div>
         </div>
       </div>
-      
 
-      <AddDealForm 
-        onAdd={handleAdd} 
+      <AddDealForm
+        onAdd={handleAdd}
         forcedType={forcedType}
-        prefill={ocrDraft}  
+        prefill={null /* ocrDraft wire-up soon */}
       />
 
       <DealsList
@@ -668,8 +842,9 @@ export default function App() {
         onCancelEdit={handleCancelEdit}
         onSave={handleSave}
       />
+
       {/* OCR Scan Section */}
-       <div style={{ ...S.container, padding: "16px 0" }}>
+      <div style={{ ...S.container, padding: "16px 0" }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
           Smart Assist – OCR
         </h2>
