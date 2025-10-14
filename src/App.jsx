@@ -273,7 +273,7 @@ function DealsList(props) {
 /* ------------------------------------------------------------------ */
 /* Add Deal form                                                       */
 /* ------------------------------------------------------------------ */
-function AddDealForm({ onAdd, forcedType }) {
+function AddDealForm({ onAdd, forcedType, prefill }) {
   const [form, setForm] = useState({
     type: "grocery",
     item: "",
@@ -300,6 +300,27 @@ function AddDealForm({ onAdd, forcedType }) {
       }));
     }
   }, [forcedType]);
+
+  // When OCR suggests fields, prefill the form (but don't overwrite user's active typing)
+  useEffect(() => {
+    if (!prefill) return;
+    setForm((f) => ({
+      ...f,
+      // only fill if empty so we don't clobber user input
+      type: prefill.type ?? f.type,
+      item: f.item || prefill.item || "",
+      store: f.store || prefill.store || "",
+      station: f.station || prefill.station || "",
+      location: f.location || prefill.location || "",
+      unit: prefill.unit || f.unit,
+      price: prefill.price != null ? String(prefill.price) : f.price,
+
+      // multi-buy
+      multiEnabled: prefill.originalMultiBuy ? true : f.multiEnabled,
+      multiQty: prefill.originalMultiBuy?.qty != null ? String(prefill.originalMultiBuy.qty) : f.multiQty,
+      multiTotal: prefill.originalMultiBuy?.total != null ? String(prefill.originalMultiBuy.total) : f.multiTotal,
+    }));
+  }, [prefill]);
 
   const unitOptions =
     form.type === "grocery"
@@ -848,7 +869,7 @@ export default function App() {
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
           Smart Assist – OCR
         </h2>
-        <OCRScan />
+        <OCRScan onSuggest={setOcrDraft} />
       </div>
     </div>
   );
