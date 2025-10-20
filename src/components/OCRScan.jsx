@@ -1,160 +1,388 @@
-﻿// OCRScan.jsx — v3.8
-// Shows confidence for text & digits; robust flyer ROI; 3-pass digits OCR; gas normalization;
-// safer price fuse (avoid ".99" when only cents are detected).
-import React, { useRef, useState } from "react";
+﻿import { useCallback, useMemo, useRef, useState } from "react";
 import Tesseract from "tesseract.js";
 
-/* ---------- tiny canvas helpers ---------- */
-function makeCanvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return [c, c.getContext("2d")]; }
-function toImg(url){return new Promise((res,rej)=>{const i=new Image();i.crossOrigin="anonymous";i.onload=()=>res(i);i.onerror=rej;i.src=url;});}
-function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+/**
+* Smart Assist – OCR
+* - Modes: auto | flyer | gas
+* - Two-pass OCR:
+*    1) Full image (text) -> show text + confidence
+*    2) ROI (preprocessed) -> digits -> show digits + confidence
+* - Fuses a final price guess from digits and/or text
+* - Debug: shows confidence, ROI preview, mode used
+*/
 
-/* grayscale + contrast + gamma */
-function preprocess(ctx,w,h,{contrast=1.0,gamma=1.0}={}) {
-  const im=ctx.getImageData(0,0,w,h), d=im.data, c=contrast, g=gamma;
-  for(let i=0;i<d.length;i+=4){let y=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2]; y=(y-128)*c+128; y=255*Math.pow(clamp(y,0,255)/255,1/g); d[i]=d[i+1]=d[i+2]=y;}
-  ctx.putImageData(im,0,0);
-}
-/* light adaptive threshold */
-function adaptiveThreshold(ctx,w,h,tile=32,offset=8){
-  const im=ctx.getImageData(0,0,w,h), d=im.data, tw=Math.ceil(w/tile), th=Math.ceil(h/tile);
-  const sums=new Array(tw*th).fill(0), cnt=new Array(tw*th).fill(0);
-  for(let y=0;y<h;y++){const ty=(y/tile)|0;for(let x=0;x<w;x++){const tx=(x/tile)|0,k=ty*tw+tx,i=(y*w+x)*4; sums[k]+=d[i]; cnt[k]++;}}
-  for(let y=0;y<h;y++){const ty=(y/tile)|0;for(let x=0;x<w;x++){const tx=(x/tile)|0,k=ty*tw+tx,i=(y*w+x)*4; const m=sums[k]/cnt[k]; const v=d[i]<(m-offset)?0:255; d[i]=d[i+1]=d[i+2]=v;}}
-  ctx.putImageData(im,0,0);
-}
-
-/* flyer ROI: right-half dense dark region */
-function flyerDigitsROI(src){
-  const w=src.width,h=src.height; const [c,ctx]=makeCanvas(w,h);
-  ctx.drawImage(src,0,0); preprocess(ctx,w,h,{contrast:1.35,gamma:1.1}); adaptiveThreshold(ctx,w,h,24,6);
-  const xStart=(w*0.45)|0; const img=ctx.getImageData(0,0,w,h).data;
-  let best={score:-1,x:xStart,y:0,rw:(w*0.5)|0,rh:(h*0.7)|0};
-  for(let y0=(h*0.05)|0;y0<(h*0.5)|0;y0+=6){
-    for(let h0=(h*0.35)|0;h0<(h*0.85)|0;h0+=12){
-      const x0=xStart,w0=(w*0.5)|0; let dark=0,tot=0;
-      for(let y=y0;y<Math.min(h,y0+h0);y+=3){for(let x=x0;x<Math.min(w,x0+w0);x+=3){const i=(y*w+x)*4; tot++; if(img[i]<40) dark++;}}
-      const density=dark/Math.max(1,tot); const score=density*(w0*h0);
-      if(score>best.score) best={score,x:x0,y:y0,rw:w0,rh:h0};
-    }
-  }
-  return best;
-}
-
-/* parse helpers */
-function priceFromText(txt){const m=txt.match(/(?:\$|C\$)?\s*(\d{1,4}(?:[.,]\d{2})?)/); return m?Number(m[1].replace(",",".")):null;}
-function parseMulti(txt){const m=txt.replace(",",".").match(/(\d+)\s*(?:for|\/|pour)\s*\$?\s*(\d+(?:\.\d{2})?)/i); if(!m) return null; const qty=+m[1], total=+m[2]; return (qty&&isFinite(total))?{qty,total,perUnit:+(total/qty).toFixed(4)}:null;}
-function avgWordConf(res){try{const words=res.data.words||[]; if(!words.length) return null; const a=words.reduce((s,w)=>s+(w.confidence??0),0)/words.length; return Math.round(a);}catch{ return null; }}
-
-/* main */
 export default function OCRScan({ onSuggest }) {
-  const [status,setStatus]=useState(""); const [out,setOut]=useState(""); const [imgUrl,setImgUrl]=useState("");
-  const [mode,setMode]=useState("flyer"); const [debug,setDebug]=useState(true); const [roiPreview,setRoiPreview]=useState(null);
-  const fileRef=useRef(null); const pick=()=>fileRef.current?.click();
+  // UI state
+  const [mode, setMode] = useState("gas"); // default to gas per your workflow
+  const [debug, setDebug] = useState(true);
 
-  async function onFile(e){const f=e.target.files?.[0]; if(!f) return; const url=URL.createObjectURL(f); setImgUrl(url); await run(url);}
-  async function run(url){
-    setStatus("Working…"); setOut(""); setRoiPreview(null);
-    try{
-      const img=await toImg(url);
-      const [base,bctx]=makeCanvas(img.naturalWidth||img.width,img.naturalHeight||img.height); bctx.drawImage(img,0,0,base.width,base.height);
-      const SCALE=Math.min(1,1200/Math.max(base.width,base.height));
-      const [small,sctx]=makeCanvas((base.width*SCALE)|0,(base.height*SCALE)|0); sctx.drawImage(base,0,0,small.width,small.height);
+  // Image state
+  const [imageURL, setImageURL] = useState(null);
+  const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 });
 
-      // 1) full text (eng+fra)
-      const fullRes=await Tesseract.recognize(small,"eng+fra",{tessedit_pageseg_mode:Tesseract.PSM.AUTO});
-      const textConf=Math.round(fullRes.data.confidence??0);
-      const fullText=(fullRes.data.text||"").replace(/\u00A0/g," ").trim();
+  // OCR outputs
+  const [status, setStatus] = useState("");
+  const [textOut, setTextOut] = useState("");
+  const [digitsOut, setDigitsOut] = useState("");
+  const [textConf, setTextConf] = useState(null);
+  const [digitsConf, setDigitsConf] = useState(null);
+  const [finalPrice, setFinalPrice] = useState(null);
 
-      // 2) ROI (mode-specific)
-      let roiRect;
-      if(mode==="flyer"){ roiRect=flyerDigitsROI(base); }
-      else{ const x=(base.width*0.52)|0, y=(base.height*0.18)|0, rw=(base.width*0.42)|0, rh=(base.height*0.65)|0; roiRect={x,y,rw,rh}; }
-      const [roi,roictx]=makeCanvas(roiRect.rw,roiRect.rh); roictx.drawImage(base,roiRect.x,roiRect.y,roiRect.rw,roiRect.rh,0,0,roiRect.rw,roiRect.rh);
-      if(mode==="gas"){ preprocess(roictx,roi.width,roi.height,{contrast:1.45,gamma:1.25}); }
-      if(debug) setRoiPreview(roi.toDataURL());
+  // ROI preview
+  const [roiPreview, setRoiPreview] = useState(null); // dataURL
+  const [roiBox, setRoiBox] = useState(null); // {x,y,w,h}
+  const fileInputRef = useRef(null);
 
-      const cfg={tessedit_pageseg_mode:Tesseract.PSM.SINGLE_LINE,tessedit_char_whitelist:"0123456789.$"};
-      // A) raw
-      let roiResA=await Tesseract.recognize(roi,"eng",cfg); let digitsText=roiResA.data.text||""; let digitsConf=avgWordConf(roiResA);
-      // B) adaptive if needed
-      if(!/\d/.test(digitsText)){
-        const [r2,c2]=makeCanvas(roi.width,roi.height); c2.drawImage(roi,0,0); adaptiveThreshold(c2,roi.width,roi.height,24,6);
-        const r=await Tesseract.recognize(r2,"eng",cfg); if((avgWordConf(r)||0)>(digitsConf||0)){digitsText=r.data.text||digitsText; digitsConf=avgWordConf(r);}
+  // ---- Helpers -------------------------------------------------------------
+
+  const loadImage = useCallback(
+    (src) =>
+      new Promise((resolve, reject) => {
+        const im = new Image();
+        im.crossOrigin = "anonymous";
+        im.onload = () => resolve(im);
+        im.onerror = reject;
+        im.src = src;
+      }),
+    []
+  );
+
+  // conservative ROI for gas signs (right-side numerals block);
+  // for flyers, crop right 38% mid band where big price usually sits.
+  const computeROI = useCallback((W, H, m) => {
+    const modeToUse = m === "auto" ? "gas" : m; // simple defaulting
+    if (modeToUse === "gas") {
+      // Focus lower-right quadrant where the large numerals live
+      return {
+        x: Math.round(W * 0.40),
+        y: Math.round(H * 0.12),
+        w: Math.round(W * 0.52),
+        h: Math.round(H * 0.80),
+      };
+    }
+    // flyer / shelf tag
+    return {
+      x: Math.round(W * 0.54),
+      y: Math.round(H * 0.28),
+      w: Math.round(W * 0.42),
+      h: Math.round(H * 0.44),
+    };
+  }, []);
+
+  // Simple grayscale + mean-threshold + slight dilation for segmented digits
+  const preprocessForDigits = useCallback(async (img, roi) => {
+    const maxEdge = 1100; // upscale cap for crisp OCR without overkill
+    const scale = Math.min(
+      2.2,
+      Math.max(1.2, maxEdge / Math.max(roi.w, roi.h))
+    );
+    const cw = Math.round(roi.w * scale);
+    const ch = Math.round(roi.h * scale);
+
+    const c = document.createElement("canvas");
+    c.width = cw;
+    c.height = ch;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, roi.x, roi.y, roi.w, roi.h, 0, 0, cw, ch);
+
+    const imgData = g.getImageData(0, 0, cw, ch);
+    const d = imgData.data;
+
+    // grayscale
+    const gray = new Uint8ClampedArray((cw * ch) | 0);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      gray[j] = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+    }
+    // mean threshold
+    let sum = 0;
+    for (let i = 0; i < gray.length; i++) sum += gray[i];
+    const mean = sum / gray.length;
+    const thresh = Math.max(96, Math.min(170, Math.round(mean))); // clamp
+
+    // binarize (invert black digits on light background)
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      const v = gray[j] < thresh ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = v;
+      d[i + 3] = 255;
+    }
+
+    // 1-pass dilation to close small gaps in stroke edges
+    // (cheap 4-neighbour max)
+    const copy = new Uint8ClampedArray(d);
+    const row = cw * 4;
+    for (let y = 1; y < ch - 1; y++) {
+      for (let x = 1; x < cw - 1; x++) {
+        const p = (y * cw + x) * 4;
+        if (copy[p] === 0) {
+          // if any neighbour is black, keep black
+          const up = p - row,
+            dn = p + row,
+            lf = p - 4,
+            rt = p + 4;
+          if (copy[up] === 0 || copy[dn] === 0 || copy[lf] === 0 || copy[rt] === 0) {
+            d[p] = d[p + 1] = d[p + 2] = 0;
+          }
+        }
       }
-      // C) high contrast if still weak
-      if(!/\d/.test(digitsText)){
-        const [r3,c3]=makeCanvas(roi.width,roi.height); c3.drawImage(roi,0,0); preprocess(c3,roi.width,roi.height,{contrast:1.6,gamma:1.15});
-        const r=await Tesseract.recognize(r3,"eng",cfg); if((avgWordConf(r)||0)>(digitsConf||0)){digitsText=r.data.text||digitsText; digitsConf=avgWordConf(r);}
-      }
-      digitsConf = digitsConf==null ? 0 : Math.max(0, Math.min(100, Math.round(digitsConf)));
+    }
 
-      // normalize digits like 7.99 from "799"
-      let priceFromDigits=null;
-      const raw=digitsText.replace(/\s/g,"");
-      const m = raw.match(/(\d{1,4})(?:[.,]?)(\d{2})/); // prefer 1–4 + 2 digits
-      if(m){
-        const int=m[1], cents=m[2];
-        if(int.length>=1){ priceFromDigits = Number(`${int.slice(0,-2)||int}.${cents}`); }
-      }
-      // if we only saw 2 digits total (e.g., "99"), treat as weak and ignore to avoid ".99"
-      if(!m && /^\d{2}$/.test(raw)) priceFromDigits=null;
+    g.putImageData(imgData, 0, 0);
+    return { dataURL: c.toDataURL("image/png"), scaled: { w: cw, h: ch } };
+  }, []);
 
-      // 3) fuse with full text + multi
-      const multi=parseMulti(fullText);
-      const priceTxt=priceFromText(fullText);
-      let fused=null;
-      if(multi) fused=multi.perUnit;
-      else if(priceFromDigits!=null && isFinite(priceFromDigits)) fused=priceFromDigits;
-      else if(priceTxt!=null && isFinite(priceTxt)) fused=priceTxt;
+  // Try to pull prices from text block (handles "119.9", "119 9", "7 99", "7.99")
+  const parsePriceFromText = useCallback((txt) => {
+    if (!txt) return null;
 
-      setStatus(`Done. OCR OK (text ${textConf}% · digits ${digitsConf}%)`);
-      setOut([
-        "— Text pass (full) —",
-        fullText || "(none)",
-        "\n— Digits pass (ROI) —",
-        (digitsText && digitsText.trim()) || "(none)",
-        "\n— Final price (auto-fused) —",
-        fused!=null ? String(fused) : "(none)"
-      ].join("\n"));
+    // Normalize weird separators
+    const t = txt
+      .replace(/[O]/g, "0")
+      .replace(/[,]/g, ".")
+      .replace(/\s+\/\s+/g, "/")
+      .replace(/[^\d.\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
-      if(onSuggest){
-        onSuggest({
-          type: mode==="gas" ? "gas" : "grocery",
-          item:"", store:"", station:"",
-          location:"",
-          unit: mode==="gas" ? "/L" : "/ea",
-          price: multi ? multi.perUnit : (fused ?? 0),
-          normalizedPerKg:null, normalizedPerL:null,
-          originalMultiBuy: multi || null,
+    // Gas-style 3 digits + .9
+    const gasMatch = t.match(/\b(\d{2,3})\s*[.\s]?\s*(9)\b/);
+    if (gasMatch) {
+      const base = parseInt(gasMatch[1], 10);
+      return +(base + 0.9 / 10).toFixed(1); // e.g. 119.9
+    }
+
+    // Flyer money like "7.99" or "7 99"
+    const flyerMatch = t.match(/\b(\d{1,3})[.\s](\d{2})\b/);
+    if (flyerMatch) {
+      return parseFloat(`${flyerMatch[1]}.${flyerMatch[2]}`);
+    }
+
+    // As fallback, any decimal-looking chunk
+    const generic = t.match(/\b\d{1,3}\.\d{1,2}\b/);
+    return generic ? parseFloat(generic[0]) : null;
+  }, []);
+
+  const parseDigitsOnly = useCallback((txt) => {
+    if (!txt) return null;
+    const matches = txt.match(/\d{1,3}(?:\.\d{1,2})?/g);
+    if (!matches) return null;
+    return matches.map((m) => parseFloat(m));
+  }, []);
+
+  // ---- OCR runner ----------------------------------------------------------
+
+  const runOCR = useCallback(
+    async (url) => {
+      try {
+        setStatus("Reading image…");
+        const img = await loadImage(url);
+        setImgNatural({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height });
+
+        // 1) full image pass for text
+        setStatus("OCR: full text pass…");
+        const pass1 = await Tesseract.recognize(url, "eng+fra", {
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
         });
+
+        const rawText = (pass1?.data?.text || "").trim();
+        setTextOut(rawText);
+        setTextConf(Math.round(pass1?.data?.confidence ?? 0));
+
+        // 2) ROI preprocessed pass for digits
+        const roi = computeROI(img.width, img.height, mode);
+        setRoiBox(roi);
+
+        const pre = await preprocessForDigits(img, roi);
+        setRoiPreview(pre.dataURL);
+
+        setStatus("OCR: digits ROI pass…");
+        const pass2 = await Tesseract.recognize(pre.dataURL, "eng+fra", {
+          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+        });
+
+        const rawDigitsText = (pass2?.data?.text || "").trim();
+        const digitsArr = parseDigitsOnly(rawDigitsText);
+        setDigitsOut(digitsArr ? digitsArr.join("  ") : "(no glyphs)");
+        setDigitsConf(Math.round(pass2?.data?.confidence ?? 0));
+
+        // 3) Fuse a final price guess
+        let fused = null;
+        // Gas: prefer gas-style parse from full text; otherwise ROI digits guess
+        const fromText = parsePriceFromText(rawText);
+        if (fromText != null) fused = fromText;
+        else if (digitsArr && digitsArr.length) {
+          // If looks like 119 and 9 in same OCR, combine; else largest with .9
+          const sorted = [...digitsArr].sort((a, b) => b - a);
+          const best = sorted[0];
+          // if best is 3 digits, force .9 (gas convention)
+          fused = best >= 100 ? +(best + 0.9 / 10).toFixed(1) : best;
+        }
+
+        setFinalPrice(fused);
+
+        // Callback up to suggestions (you wire into form fields)
+        if (onSuggest) {
+          onSuggest({
+            modeUsed: mode,
+            text: rawText,
+            textConf: Math.round(pass1?.data?.confidence ?? 0),
+            digits: digitsArr || [],
+            digitsConf: Math.round(pass2?.data?.confidence ?? 0),
+            finalPrice: fused,
+          });
+        }
+
+        setStatus("Done.");
+      } catch (err) {
+        console.error(err);
+        setStatus("OCR failed. Try a clearer image.");
       }
-    }catch(err){ console.error(err); setStatus("OCR failed"); }
+    },
+    [
+      mode,
+      loadImage,
+      computeROI,
+      preprocessForDigits,
+      parseDigitsOnly,
+      parsePriceFromText,
+      onSuggest,
+    ]
+  );
+
+  // ---- UI handlers ---------------------------------------------------------
+
+  function handleFile(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setImageURL(url);
+
+    // Reset outputs
+    setStatus("Queued…");
+    setTextOut("");
+    setDigitsOut("");
+    setTextConf(null);
+    setDigitsConf(null);
+    setFinalPrice(null);
+    setRoiPreview(null);
+    setRoiBox(null);
+
+    // Kick OCR
+    runOCR(url);
   }
+
+  // nice label
+  const confLabel = useMemo(() => {
+    const t = textConf != null ? `${textConf}%` : "—";
+    const d = digitsConf != null ? `${digitsConf}%` : "—";
+    return `Text conf: ${t} | Digits conf: ${d}`;
+  }, [textConf, digitsConf]);
+
+  // ---- Render --------------------------------------------------------------
 
   return (
-    <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:12}}>
-      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-        <button onClick={()=>fileRef.current?.click()} style={{padding:"8px 12px",borderRadius:10,border:"1px solid #d1d5db"}}>Scan from image</button>
-        <select value={mode} onChange={(e)=>setMode(e.target.value)} style={{padding:8,borderRadius:10,border:"1px solid #d1d5db"}}>
-          <option value="flyer">Flyer / Shelf tag</option><option value="gas">Gas sign</option>
-        </select>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
-          <input type="checkbox" checked={debug} onChange={(e)=>setDebug(e.target.checked)} /> Debug
-        </label>
-        <span style={{fontSize:12,color:"#6b7280"}}>Supports ENG/FRA; multi-buy; tuned ROI; auto-normalizes cents; shows pass confidences.</span>
-      </div>
-      <input type="file" accept="image/*" ref={fileRef} onChange={onFile} style={{display:"none"}} />
-      {imgUrl && (
-        <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-          <img src={imgUrl} alt="Selected" style={{width:200,height:"auto",borderRadius:8,border:"1px solid #e5e7eb"}}/>
-          <textarea readOnly value={`${status}\n\n${out}`} style={{flex:1,minHeight:230,padding:8,borderRadius:8,border:"1px solid #e5e7eb",fontFamily:"ui-monospace,Menlo,monospace",fontSize:12}}/>
+    <div className="p-3 border rounded-xl bg-white shadow-sm mt-3 w-full">
+      <h2 className="text-lg font-semibold mb-2 text-gray-800">Smart Assist — OCR</h2>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFile}
+          className="border p-1 rounded text-sm"
+        />
+
+        <div className="inline-flex items-center gap-2">
+          <label className="text-sm text-gray-700">Mode:</label>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            className="border rounded p-1 text-sm"
+          >
+            <option value="auto">Auto (detect)</option>
+            <option value="gas">Gas sign</option>
+            <option value="flyer">Flyer / Shelf tag</option>
+          </select>
         </div>
-      )}
-      {debug && roiPreview && (
-        <div style={{marginTop:8}}>
-          <div style={{fontSize:12,color:"#6b7280",marginBottom:4}}>ROI preview</div>
-          <img src={roiPreview} alt="ROI" style={{width:180,border:"1px solid #e5e7eb",borderRadius:6}}/>
+
+        <label className="text-sm text-gray-600 flex items-center">
+          <input
+            type="checkbox"
+            checked={debug}
+            onChange={(e) => setDebug(e.target.checked)}
+            className="mr-1"
+          />
+          Debug (shows confidences & ROI)
+        </label>
+
+        <span className="text-sm text-gray-600">{status}</span>
+      </div>
+
+      {imageURL && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+          {/* Left: original image */}
+          <div className="md:col-span-1">
+            <div className="text-xs text-gray-500 mb-1">
+              Original ({imgNatural.w}×{imgNatural.h})
+            </div>
+            <img
+              src={imageURL}
+              alt="Preview"
+              className="rounded-md border max-h-[320px] object-contain w-full bg-gray-50"
+            />
+          </div>
+
+          {/* Middle: text + digits */}
+          <div className="md:col-span-1">
+            <div className="text-xs text-gray-500 mb-1">
+              Mode: <span className="font-medium">{mode}</span> • {confLabel}
+            </div>
+
+            <div className="text-xs text-gray-400 mb-1">— Text pass (full) —</div>
+            <textarea
+              className="w-full border rounded p-1 mb-2 text-xs bg-gray-50 min-h-[140px]"
+              readOnly
+              value={textOut}
+            />
+
+            <div className="text-xs text-gray-400 mb-1">— Digits pass (ROI) —</div>
+            <textarea
+              className="w-full border rounded p-1 text-xs bg-gray-100 min-h-[70px]"
+              readOnly
+              value={digitsOut}
+            />
+
+            <div className="mt-2 text-sm">
+              <span className="text-gray-600">Final price (auto-fused): </span>
+              <span className="font-semibold">
+                {finalPrice != null ? finalPrice : "—"}
+              </span>
+            </div>
+          </div>
+
+          {/* Right: ROI preview */}
+          <div className="md:col-span-1">
+            {debug && (
+              <>
+                <div className="text-xs text-gray-500 mb-1">
+                  ROI preview {roiBox ? `(${roiBox.w}×${roiBox.h} @ ${roiBox.x},${roiBox.y})` : ""}
+                </div>
+                {roiPreview ? (
+                  <img
+                    src={roiPreview}
+                    alt="ROI"
+                    className="rounded-md border w-full max-h-[320px] object-contain bg-white"
+                  />
+                ) : (
+                  <div className="border rounded-md h-[320px] bg-gray-50 flex items-center justify-center text-xs text-gray-400">
+                    (load an image to see ROI)
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
