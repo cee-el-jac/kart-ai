@@ -1,390 +1,418 @@
-﻿import { useCallback, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import Tesseract from "tesseract.js";
 
-/**
-* Smart Assist – OCR
-* - Modes: auto | flyer | gas
-* - Two-pass OCR:
-*    1) Full image (text) -> show text + confidence
-*    2) ROI (preprocessed) -> digits -> show digits + confidence
-* - Fuses a final price guess from digits and/or text
-* - Debug: shows confidence, ROI preview, mode used
-*/
+/* ────────────────────────────────────────────────────────────────────────────
+   Utilities (kept ABOVE the component so they’re initialized before use)
+──────────────────────────────────────────────────────────────────────────── */
+function clamp(min, v, max) {
+  return Math.max(min, Math.min(max, v));
+}
+function clampByte(n) {
+  return clamp(0, Number.isFinite(n) ? Math.round(n) : 0, 255);
+}
+function toInt(v) {
+  return Number.isFinite(v) ? Math.round(v) : null;
+}
+function cleanSpaces(s) {
+  return (s || "").replace(/\u00A0/g, " ").trim();
+}
+function countDigits(s) {
+  return (s.match(/\d/g) || []).length;
+}
 
+/** Simple Otsu threshold on a canvas region (expects grayscale 0..255) */
+function otsuThresholdFromCanvas(canvas) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const { width: w, height: h } = canvas;
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  // Build grayscale histogram
+  const hist = new Array(256).fill(0);
+  for (let i = 0; i < data.length; i += 4) {
+    // image is already grayscale in our pipeline; any channel is fine
+    const g = data[i] | 0;
+    hist[g]++;
+  }
+
+  const N = w * h;
+  let sumAll = 0;
+  for (let i = 0; i < 256; i++) sumAll += i * hist[i];
+
+  let sumB = 0;
+  let wB = 0;
+  let varMax = -1;
+  let threshold = 127;
+
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = N - wB;
+    if (wF === 0) break;
+
+    sumB += t * hist[t];
+
+    const mB = sumB / wB;
+    const mF = (sumAll - sumB) / wF;
+
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > varMax) {
+      varMax = between;
+      threshold = t;
+    }
+  }
+  return threshold;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Component
+──────────────────────────────────────────────────────────────────────────── */
 export default function OCRScan({ onSuggest }) {
-  // UI state
-  const [mode, setMode] = useState("gas"); // default to gas per your workflow
-  const [debug, setDebug] = useState(true);
-
-  // Image state
-  const [imageURL, setImageURL] = useState(null);
-  const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 });
-
-  // OCR outputs
+  // ── UI State ──────────────────────────────────────────────────────────────
   const [status, setStatus] = useState("");
-  const [textOut, setTextOut] = useState("");
-  const [digitsOut, setDigitsOut] = useState("");
-  const [textConf, setTextConf] = useState(null);
-  const [digitsConf, setDigitsConf] = useState(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [text, setText] = useState("");
+
+  // confidences/digit quality
+  const [confUpper, setConfUpper] = useState(null);
+  const [confLower, setConfLower] = useState(null);
+  const [digitRatio, setDigitRatio] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(null);
+
+  // knobs
+  const [scale, setScale] = useState(3.4);
+  const [threshA, setThreshA] = useState(150); // ROI A (upper)
+  const [threshB, setThreshB] = useState(150); // ROI B (lower)
+  const [invert, setInvert] = useState(false);
+  const [autoOtsu, setAutoOtsu] = useState(true);
+  const [yOffset, setYOffset] = useState(0.0); // -0.08 .. +0.08
+
+  // previews
+  const [previewA, setPreviewA] = useState("");
+  const [previewB, setPreviewB] = useState("");
+
+  // fused “final price” (when digits are clean)
   const [finalPrice, setFinalPrice] = useState(null);
 
-  // ROI preview
-  const [roiPreview, setRoiPreview] = useState(null); // dataURL
-  const [roiBox, setRoiBox] = useState(null); // {x,y,w,h}
-  const fileInputRef = useRef(null);
+  // refs
+  const fileRef = useRef(null);
+  const workCanvasRef = useRef(null);
+  const debounceRef = useRef(null);
 
-  // ---- Helpers -------------------------------------------------------------
+  // ── ROI definition (fractions of full image) ──────────────────────────────
+  const rois = useMemo(() => {
+    // Base bands tuned on Costco-style pylons
+    const baseA = { x: 0.12, y: 0.31, w: 0.76, h: 0.22 }; // upper digits band
+    const baseB = { x: 0.12, y: 0.58, w: 0.76, h: 0.22 }; // lower digits band
 
-  const loadImage = useCallback(
-    (src) =>
-      new Promise((resolve, reject) => {
-        const im = new Image();
-        im.crossOrigin = "anonymous";
-        im.onload = () => resolve(im);
-        im.onerror = reject;
-        im.src = src;
-      }),
-    []
-  );
-
-  // conservative ROI for gas signs (right-side numerals block);
-  // for flyers, crop right 38% mid band where big price usually sits.
-  const computeROI = useCallback((W, H, m) => {
-    const modeToUse = m === "auto" ? "gas" : m; // simple defaulting
-    if (modeToUse === "gas") {
-      // Focus lower-right quadrant where the large numerals live
-      return {
-        x: Math.round(W * 0.40),
-        y: Math.round(H * 0.12),
-        w: Math.round(W * 0.52),
-        h: Math.round(H * 0.80),
-      };
-    }
-    // flyer / shelf tag
+    const shift = clamp(-0.08, yOffset, 0.08);
     return {
-      x: Math.round(W * 0.54),
-      y: Math.round(H * 0.28),
-      w: Math.round(W * 0.42),
-      h: Math.round(H * 0.44),
+      A: { ...baseA, y: clamp(0, baseA.y + shift, 1 - baseA.h) },
+      B: { ...baseB, y: clamp(0, baseB.y + shift, 1 - baseB.h) },
     };
-  }, []);
+  }, [yOffset]);
 
-  // Simple grayscale + mean-threshold + slight dilation for segmented digits
-  const preprocessForDigits = useCallback(async (img, roi) => {
-    const maxEdge = 1100; // upscale cap for crisp OCR without overkill
-    const scale = Math.min(
-      2.2,
-      Math.max(1.2, maxEdge / Math.max(roi.w, roi.h))
-    );
-    const cw = Math.round(roi.w * scale);
-    const ch = Math.round(roi.h * scale);
-
-    const c = document.createElement("canvas");
-    c.width = cw;
-    c.height = ch;
-    const g = c.getContext("2d", { willReadFrequently: true });
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = "high";
-    g.drawImage(img, roi.x, roi.y, roi.w, roi.h, 0, 0, cw, ch);
-
-    const imgData = g.getImageData(0, 0, cw, ch);
-    const d = imgData.data;
-
-    // grayscale
-    const gray = new Uint8ClampedArray((cw * ch) | 0);
-    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-      gray[j] = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
-    }
-    // mean threshold
-    let sum = 0;
-    for (let i = 0; i < gray.length; i++) sum += gray[i];
-    const mean = sum / gray.length;
-    const thresh = Math.max(96, Math.min(170, Math.round(mean))); // clamp
-
-    // binarize (invert black digits on light background)
-    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-      const v = gray[j] < thresh ? 0 : 255;
-      d[i] = d[i + 1] = d[i + 2] = v;
-      d[i + 3] = 255;
-    }
-
-    // 1-pass dilation to close small gaps in stroke edges
-    // (cheap 4-neighbour max)
-    const copy = new Uint8ClampedArray(d);
-    const row = cw * 4;
-    for (let y = 1; y < ch - 1; y++) {
-      for (let x = 1; x < cw - 1; x++) {
-        const p = (y * cw + x) * 4;
-        if (copy[p] === 0) {
-          // if any neighbour is black, keep black
-          const up = p - row,
-            dn = p + row,
-            lf = p - 4,
-            rt = p + 4;
-          if (copy[up] === 0 || copy[dn] === 0 || copy[lf] === 0 || copy[rt] === 0) {
-            d[p] = d[p + 1] = d[p + 2] = 0;
-          }
-        }
-      }
-    }
-
-    g.putImageData(imgData, 0, 0);
-    return { dataURL: c.toDataURL("image/png"), scaled: { w: cw, h: ch } };
-  }, []);
-
-  // Try to pull prices from text block (handles "119.9", "119 9", "7 99", "7.99")
-  const parsePriceFromText = useCallback((txt) => {
-    if (!txt) return null;
-
-    // Normalize weird separators
-    const t = txt
-      .replace(/[O]/g, "0")
-      .replace(/[,]/g, ".")
-      .replace(/\s+\/\s+/g, "/")
-      .replace(/[^\d.\s]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    // Gas-style 3 digits + .9
-    const gasMatch = t.match(/\b(\d{2,3})\s*[.\s]?\s*(9)\b/);
-    if (gasMatch) {
-      const base = parseInt(gasMatch[1], 10);
-      return +(base + 0.9 / 10).toFixed(1); // e.g. 119.9
-    }
-
-    // Flyer money like "7.99" or "7 99"
-    const flyerMatch = t.match(/\b(\d{1,3})[.\s](\d{2})\b/);
-    if (flyerMatch) {
-      return parseFloat(`${flyerMatch[1]}.${flyerMatch[2]}`);
-    }
-
-    // As fallback, any decimal-looking chunk
-    const generic = t.match(/\b\d{1,3}\.\d{1,2}\b/);
-    return generic ? parseFloat(generic[0]) : null;
-  }, []);
-
-  const parseDigitsOnly = useCallback((txt) => {
-    if (!txt) return null;
-    const matches = txt.match(/\d{1,3}(?:\.\d{1,2})?/g);
-    if (!matches) return null;
-    return matches.map((m) => parseFloat(m));
-  }, []);
-
-  // ---- OCR runner ----------------------------------------------------------
-
-  const runOCR = useCallback(
-    async (url) => {
-      try {
-        setStatus("Reading image…");
-        const img = await loadImage(url);
-        setImgNatural({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height });
-
-        // 1) full image pass for text
-        setStatus("OCR: full text pass…");
-        const pass1 = await Tesseract.recognize(url, "eng+fra", {
-          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
-        });
-
-        const rawText = (pass1?.data?.text || "").trim();
-        setTextOut(rawText);
-        setTextConf(Math.round(pass1?.data?.confidence ?? 0));
-
-        // 2) ROI preprocessed pass for digits
-        const roi = computeROI(img.width, img.height, mode);
-        setRoiBox(roi);
-
-        const pre = await preprocessForDigits(img, roi);
-        setRoiPreview(pre.dataURL);
-
-        setStatus("OCR: digits ROI pass…");
-        const pass2 = await Tesseract.recognize(pre.dataURL, "eng+fra", {
-          tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
-        });
-
-        const rawDigitsText = (pass2?.data?.text || "").trim();
-        const digitsArr = parseDigitsOnly(rawDigitsText);
-        setDigitsOut(digitsArr ? digitsArr.join("  ") : "(no glyphs)");
-        setDigitsConf(Math.round(pass2?.data?.confidence ?? 0));
-
-        // 3) Fuse a final price guess
-        let fused = null;
-        // Gas: prefer gas-style parse from full text; otherwise ROI digits guess
-        const fromText = parsePriceFromText(rawText);
-        if (fromText != null) fused = fromText;
-        else if (digitsArr && digitsArr.length) {
-          // If looks like 119 and 9 in same OCR, combine; else largest with .9
-          const sorted = [...digitsArr].sort((a, b) => b - a);
-          const best = sorted[0];
-          // if best is 3 digits, force .9 (gas convention)
-          fused = best >= 100 ? +(best + 0.9 / 10).toFixed(1) : best;
-        }
-
-        setFinalPrice(fused);
-
-        // Callback up to suggestions (you wire into form fields)
-        if (onSuggest) {
-          onSuggest({
-            modeUsed: mode,
-            text: rawText,
-            textConf: Math.round(pass1?.data?.confidence ?? 0),
-            digits: digitsArr || [],
-            digitsConf: Math.round(pass2?.data?.confidence ?? 0),
-            finalPrice: fused,
-          });
-        }
-
-        setStatus("Done.");
-      } catch (err) {
-        console.error(err);
-        setStatus("OCR failed. Try a clearer image.");
-      }
-    },
-    [
-      mode,
-      loadImage,
-      computeROI,
-      preprocessForDigits,
-      parseDigitsOnly,
-      parsePriceFromText,
-      onSuggest,
-    ]
-  );
-
-  // ---- UI handlers ---------------------------------------------------------
-
+  // ── File handling ─────────────────────────────────────────────────────────
+  const handlePick = () => fileRef.current?.click();
   function handleFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     const url = URL.createObjectURL(f);
-    setImageURL(url);
-
-    // Reset outputs
-    setStatus("Queued…");
-    setTextOut("");
-    setDigitsOut("");
-    setTextConf(null);
-    setDigitsConf(null);
-    setFinalPrice(null);
-    setRoiPreview(null);
-    setRoiBox(null);
-
-    // Kick OCR
-    runOCR(url);
+    setImageUrl(url);
+    resetOutputs();
   }
 
-  // nice label
-  const confLabel = useMemo(() => {
-    const t = textConf != null ? `${textConf}%` : "—";
-    const d = digitsConf != null ? `${digitsConf}%` : "—";
-    return `Text conf: ${t} | Digits conf: ${d}`;
-  }, [textConf, digitsConf]);
+  function resetOutputs() {
+    setStatus("");
+    setText("");
+    setPreviewA("");
+    setPreviewB("");
+    setConfUpper(null);
+    setConfLower(null);
+    setDigitRatio(null);
+    setFinalPrice(null);
+    setElapsedMs(null);
+  }
 
-  // ---- Render --------------------------------------------------------------
+  // ── Auto-rescan when knobs move (if image loaded) ─────────────────────────
+  useEffect(() => {
+    if (!imageUrl) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runOCR(imageUrl), 150);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale, threshA, threshB, invert, autoOtsu, yOffset]);
 
+  // ── Core OCR ──────────────────────────────────────────────────────────────
+  async function runOCR(url) {
+    try {
+      setStatus("Preparing image…");
+      const src = await loadImage(url);
+
+      const t0 = performance.now();
+
+      // preprocess both ROIs (separate canvases so we can preview each)
+      const aCanvas = preprocessROI(src, rois.A, { scale, invert, threshold: threshA, autoOtsu });
+      const bCanvas = preprocessROI(src, rois.B, { scale, invert, threshold: threshB, autoOtsu });
+
+      setPreviewA(aCanvas.toDataURL("image/png"));
+      setPreviewB(bCanvas.toDataURL("image/png"));
+
+      // OCR pass (single line works best for the number strip)
+      setStatus("Running OCR (upper row)...");
+      const resA = await Tesseract.recognize(aCanvas, "eng+fra", {
+        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+      });
+
+      setStatus("Running OCR (lower row)...");
+      const resB = await Tesseract.recognize(bCanvas, "eng+fra", {
+        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+      });
+
+      const t1 = performance.now();
+      setElapsedMs(Math.round(t1 - t0));
+
+      const textA = cleanSpaces(resA?.data?.text || "");
+      const textB = cleanSpaces(resB?.data?.text || "");
+      setText(`${textA}\n${textB}`);
+
+      const cA = toInt(resA?.data?.confidence ?? 0);
+      const cB = toInt(resB?.data?.confidence ?? 0);
+      setConfUpper(cA);
+      setConfLower(cB);
+
+      const fused = `${textA} ${textB}`.trim();
+      const ratio = Math.round((countDigits(fused) / (fused.replace(/\s/g, "").length || 1)) * 100);
+      setDigitRatio(ratio);
+
+      // naive fused price guess: pick the two best numeric blobs in each line
+      const digitsA = (textA.match(/\d[\d.,]*/g) || []).map(s => s.replace(",", "."));
+      const digitsB = (textB.match(/\d[\d.,]*/g) || []).map(s => s.replace(",", "."));
+      const pickA = digitsA.find(Boolean);
+      const pickB = digitsB.find(Boolean);
+      const maybeA = pickA ? Number(pickA) : NaN;
+      const maybeB = pickB ? Number(pickB) : NaN;
+
+      if (Number.isFinite(maybeA) || Number.isFinite(maybeB)) {
+        // for UI we’ll show the upper if present, otherwise the lower
+        setFinalPrice(Number.isFinite(maybeA) ? maybeA : maybeB);
+      } else {
+        setFinalPrice(null);
+      }
+
+      setStatus("OCR complete.");
+    } catch (err) {
+      console.error(err);
+      setStatus("OCR failed. Try a clearer image.");
+      setPreviewA("");
+      setPreviewB("");
+      setConfUpper(null);
+      setConfLower(null);
+      setDigitRatio(null);
+      setFinalPrice(null);
+      setElapsedMs(null);
+    }
+  }
+
+  // ── Preprocess a single ROI into a canvas (grayscale → optional threshold) ─
+  function preprocessROI(img, roi, opts) {
+    const { scale = 3, threshold = 150, invert = false, autoOtsu = true } = opts || {};
+    const sx = Math.round(img.naturalWidth * roi.x);
+    const sy = Math.round(img.naturalHeight * roi.y);
+    const sw = Math.max(1, Math.round(img.naturalWidth * roi.w));
+    const sh = Math.max(1, Math.round(img.naturalHeight * roi.h));
+
+    const outW = Math.max(1, Math.round(sw * Math.max(1, scale)));
+    const outH = Math.max(1, Math.round(sh * Math.max(1, scale)));
+
+    const canvas = (workCanvasRef.current ||= document.createElement("canvas"));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    canvas.width = outW;
+    canvas.height = outH;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+    // grayscale
+    const imgData = ctx.getImageData(0, 0, outW, outH);
+    const px = imgData.data;
+    for (let i = 0; i < px.length; i += 4) {
+      let g = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      if (invert) g = 255 - g;
+      px[i] = px[i + 1] = px[i + 2] = clampByte(g);
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // threshold
+    let thr = threshold;
+    if (autoOtsu) {
+      thr = otsuThresholdFromCanvas(canvas);
+    }
+    const imgData2 = ctx.getImageData(0, 0, outW, outH);
+    const px2 = imgData2.data;
+    for (let i = 0; i < px2.length; i += 4) {
+      const v = px2[i] >= thr ? 255 : 0;
+      px2[i] = px2[i + 1] = px2[i + 2] = v;
+    }
+    ctx.putImageData(imgData2, 0, 0);
+
+    return canvas;
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  // ── UI ────────────────────────────────────────────────────────────────────
   return (
-    <div className="p-3 border rounded-xl bg-white shadow-sm mt-3 w-full">
-      <h2 className="text-lg font-semibold mb-2 text-gray-800">Smart Assist — OCR</h2>
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+      {/* controls */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button
+          onClick={handlePick}
+          style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #d1d5db", cursor: "pointer" }}
+        >
+          Scan from image
+        </button>
 
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFile}
-          className="border p-1 rounded text-sm"
-        />
-
-        <div className="inline-flex items-center gap-2">
-          <label className="text-sm text-gray-700">Mode:</label>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            className="border rounded p-1 text-sm"
-          >
-            <option value="auto">Auto (detect)</option>
-            <option value="gas">Gas sign</option>
-            <option value="flyer">Flyer / Shelf tag</option>
-          </select>
-        </div>
-
-        <label className="text-sm text-gray-600 flex items-center">
+        <label style={{ fontSize: 12 }}>
+          Scale&nbsp;
           <input
-            type="checkbox"
-            checked={debug}
-            onChange={(e) => setDebug(e.target.checked)}
-            className="mr-1"
+            type="number"
+            step="0.1"
+            min="1"
+            value={scale}
+            onChange={(e) => setScale(Number(e.target.value || 1))}
+            style={{ width: 64, padding: "4px 6px" }}
           />
-          Debug (shows confidences & ROI)
         </label>
 
-        <span className="text-sm text-gray-600">{status}</span>
+        <label style={{ fontSize: 12 }}>
+          Thresh A&nbsp;
+          <input
+            type="number"
+            min="0"
+            max="255"
+            value={threshA}
+            onChange={(e) => setThreshA(Number(e.target.value))}
+            style={{ width: 64, padding: "4px 6px" }}
+            disabled={autoOtsu}
+          />
+        </label>
+
+        <label style={{ fontSize: 12 }}>
+          Thresh B&nbsp;
+          <input
+            type="number"
+            min="0"
+            max="255"
+            value={threshB}
+            onChange={(e) => setThreshB(Number(e.target.value))}
+            style={{ width: 64, padding: "4px 6px" }}
+            disabled={autoOtsu}
+          />
+        </label>
+
+        <label style={{ fontSize: 12 }}>
+          Y-offset&nbsp;
+          <input
+            type="range"
+            min={-8}
+            max={8}
+            step={1}
+            value={Math.round(yOffset * 100)}
+            onChange={(e) => setYOffset(Number(e.target.value) / 100)}
+            style={{ width: 140, verticalAlign: "middle" }}
+          />
+        </label>
+
+        <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
+          Invert
+        </label>
+
+        <label style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={autoOtsu} onChange={(e) => setAutoOtsu(e.target.checked)} />
+          Auto-Otsu
+        </label>
+
+        <button
+          onClick={() => imageUrl && runOCR(imageUrl)}
+          style={{ marginLeft: "auto", padding: "8px 12px", borderRadius: 10, border: "1px solid #d1d5db", cursor: "pointer" }}
+        >
+          Rescan
+        </button>
+
+        {onSuggest ? (
+          <button
+            onClick={() => onSuggest?.({ type: "gas", price: finalPrice || 0, unit: "/L", note: text })}
+            style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #d1d5db", cursor: "pointer" }}
+          >
+            Use in Add Deal
+          </button>
+        ) : null}
       </div>
 
-      {imageURL && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-          {/* Left: original image */}
-          <div className="md:col-span-1">
-            <div className="text-xs text-gray-500 mb-1">
-              Original ({imgNatural.w}×{imgNatural.h})
-            </div>
-            <img
-              src={imageURL}
-              alt="Preview"
-              className="rounded-md border max-h-[320px] object-contain w-full bg-gray-50"
-            />
-          </div>
+      {/* hidden input */}
+      <input type="file" ref={fileRef} accept="image/*" onChange={handleFile} style={{ display: "none" }} />
 
-          {/* Middle: text + digits */}
-          <div className="md:col-span-1">
-            <div className="text-xs text-gray-500 mb-1">
-              Mode: <span className="font-medium">{mode}</span> • {confLabel}
-            </div>
+      {/* status row */}
+      <div style={{ marginTop: 8, fontSize: 12, color: "#374151", display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <div><strong>Status:</strong> {status || "—"}</div>
+        <div><strong>Upper conf:</strong> {confUpper ?? "—"}%</div>
+        <div><strong>Lower conf:</strong> {confLower ?? "—"}%</div>
+        <div><strong>Digit ratio:</strong> {digitRatio != null ? `${digitRatio}%` : "—"}</div>
+        <div><strong>Elapsed:</strong> {elapsedMs != null ? `${elapsedMs} ms` : "—"}</div>
+        <div><strong>Final price:</strong> {finalPrice != null ? finalPrice : "—"}</div>
+      </div>
 
-            <div className="text-xs text-gray-400 mb-1">— Text pass (full) —</div>
-            <textarea
-              className="w-full border rounded p-1 mb-2 text-xs bg-gray-50 min-h-[140px]"
-              readOnly
-              value={textOut}
-            />
-
-            <div className="text-xs text-gray-400 mb-1">— Digits pass (ROI) —</div>
-            <textarea
-              className="w-full border rounded p-1 text-xs bg-gray-100 min-h-[70px]"
-              readOnly
-              value={digitsOut}
-            />
-
-            <div className="mt-2 text-sm">
-              <span className="text-gray-600">Final price (auto-fused): </span>
-              <span className="font-semibold">
-                {finalPrice != null ? finalPrice : "—"}
-              </span>
-            </div>
-          </div>
-
-          {/* Right: ROI preview */}
-          <div className="md:col-span-1">
-            {debug && (
-              <>
-                <div className="text-xs text-gray-500 mb-1">
-                  ROI preview {roiBox ? `(${roiBox.w}×${roiBox.h} @ ${roiBox.x},${roiBox.y})` : ""}
+      {/* previews + text */}
+      {imageUrl ? (
+        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 12, marginTop: 10 }}>
+          <img
+            src={imageUrl}
+            alt="Selected"
+            style={{ width: 220, height: "auto", borderRadius: 8, border: "1px solid #e5e7eb" }}
+            onLoad={() => runOCR(imageUrl)}
+          />
+          <div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+              {previewA ? (
+                <div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Processed ROI A (upper)</div>
+                  <img src={previewA} alt="roi-a" style={{ maxWidth: 320, borderRadius: 6, border: "1px solid #e5e7eb" }} />
                 </div>
-                {roiPreview ? (
-                  <img
-                    src={roiPreview}
-                    alt="ROI"
-                    className="rounded-md border w-full max-h-[320px] object-contain bg-white"
-                  />
-                ) : (
-                  <div className="border rounded-md h-[320px] bg-gray-50 flex items-center justify-center text-xs text-gray-400">
-                    (load an image to see ROI)
-                  </div>
-                )}
-              </>
-            )}
+              ) : null}
+              {previewB ? (
+                <div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Processed ROI B (lower)</div>
+                  <img src={previewB} alt="roi-b" style={{ maxWidth: 320, borderRadius: 6, border: "1px solid #e5e7eb" }} />
+                </div>
+              ) : null}
+            </div>
+            <textarea
+              value={text}
+              readOnly
+              placeholder="OCR text will appear here…"
+              style={{
+                width: "100%",
+                minHeight: 180,
+                padding: 8,
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              }}
+            />
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 } 
