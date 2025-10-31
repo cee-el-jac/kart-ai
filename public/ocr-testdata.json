@@ -1,0 +1,38 @@
+{
+  "images": [
+    {
+      "id": "costco01",
+      "label": "Costco Gas Sign",
+      "url": "/testdata/costco_board_01.jpg"
+    },
+    {
+      "id": "esso01",
+      "label": "Esso Gas Sign",
+      "url": "/testdata/esso_sign_01.jpg"
+    }
+  ],
+  "presets": [
+    {
+      "id": "costco-default",
+      "label": "Costco (bright daylight)",
+      "mode": "gas",
+      "scale": 3.4,
+      "threshA": 150,
+      "threshB": 150,
+      "invert": false,
+      "yOffset": 0.08,
+      "autoOtsu": true
+    },
+    {
+      "id": "esso-default",
+      "label": "Esso (overcast)",
+      "mode": "gas",
+      "scale": 3.2,
+      "threshA": 145,
+      "threshB": 155,
+      "invert": false,
+      "yOffset": 0.1,
+      "autoOtsu": true
+    }
+  ]
+} 

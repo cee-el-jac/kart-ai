@@ -1,19 +1,29 @@
 import React, { useEffect, useMemo, useState } from "react";
+import ToastHost from "./components/ToastHost"; 
 import OCRScan from "./components/OCRScan";
+import MediaUploader from "./components/MediaUploader";
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
 import { db } from "./firebaseClient";
 import {
-  collection, doc, addDoc, getDoc, updateDoc, deleteDoc,
-  onSnapshot, serverTimestamp, query, orderBy,
+  collection,
+  doc,
+  addDoc,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  serverTimestamp,
+  query,
+  orderBy,
 } from "firebase/firestore";
+// NOTE: if you prefer deterministic IDs, you can import upsertDeal and use it in createDeal()
+// import { upsertDeal } from "./services/firestoreDeals";
 
-/* ------------------------------------------------------------------ */
-/* Firestore Timestamp -> JS Date helpers                              */
-/* ------------------------------------------------------------------ */
+/* ----------------------------- helpers ----------------------------- */
 function toJsDate(ts) {
   if (!ts) return null;
   if (ts instanceof Date) return ts;
-  if (typeof ts?.toDate === "function") return ts.toDate();            // Firestore Timestamp
+  if (typeof ts?.toDate === "function") return ts.toDate();
   if (typeof ts?.seconds === "number") return new Date(ts.seconds * 1000);
   if (typeof ts === "number" || typeof ts === "string") return new Date(ts);
   return null;
@@ -23,9 +33,7 @@ function fmtDate(ts) {
   return d ? d.toLocaleString() : "";
 }
 
-/* ------------------------------------------------------------------ */
-/* styles                                                              */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ styles ----------------------------- */
 const S = {
   page: {
     fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
@@ -35,29 +43,57 @@ const S = {
   },
   container: { maxWidth: 960, margin: "0 auto", padding: "0 16px" },
   header: {
-    position: "sticky", top: 0, zIndex: 10,
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
     backdropFilter: "blur(6px)",
     background: "rgba(255,255,255,0.85)",
     borderBottom: "1px solid #e5e7eb",
     padding: "16px 12px",
-    display: "flex", alignItems: "center",
+    display: "flex",
+    alignItems: "center",
   },
-  headerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0" },
+  headerRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 0",
+  },
   headLeft: { display: "flex", alignItems: "center", gap: 12 },
   logo: { width: 80, height: 80, borderRadius: 12, objectFit: "cover" },
   subtitle: { margin: 0, fontSize: 12, color: "#6b7280" },
-
   form: { display: "grid", gap: 8, gridTemplateColumns: "repeat(12, 1fr)" },
-  input: { padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 12, outline: "none" },
-
-  toolbar: { display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", padding: "8px 0 16px" },
+  input: {
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    outline: "none",
+  },
+  toolbar: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "8px 0 16px",
+  },
   left: { display: "flex", gap: 8, alignItems: "center" },
   right: { display: "flex", gap: 8, alignItems: "center" },
-
   list: { display: "grid", gap: 10, marginBottom: 40 },
   card: { border: "1px solid #e5e7eb", borderRadius: 16, padding: 14 },
-  row: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
-  badge: { fontSize: 10, textTransform: "uppercase", letterSpacing: 0.6, border: "1px solid #e5e7eb", padding: "2px 6px", borderRadius: 999 },
+  row: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  badge: {
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    border: "1px solid #e5e7eb",
+    padding: "2px 6px",
+    borderRadius: 999,
+  },
   h3: { margin: "6px 0 2px", fontSize: 16, fontWeight: 600 },
   muted: { fontSize: 12, color: "#6b7280" },
   error: { color: "#b91c1c", fontSize: 13, marginTop: 4 },
@@ -65,13 +101,11 @@ const S = {
 
 const BRAND = {
   green: "#00674F",
-  greenBg: "#E7F3F0",
-  danger: "#b91c1c",
   grayBorder: "#e5e7eb",
   text: "#111",
   white: "#fff",
+  danger: "#b91c1c",
 };
-
 const BTN = {
   base: {
     padding: "10px 14px",
@@ -87,9 +121,7 @@ const BTN = {
   danger: { background: BRAND.white, color: BRAND.danger, border: `1px solid ${BRAND.danger}` },
 };
 
-/* ------------------------------------------------------------------ */
-/* Header                                                              */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ header ----------------------------- */
 function Header() {
   return (
     <header style={S.header}>
@@ -97,7 +129,9 @@ function Header() {
         <div style={S.headerRow}>
           <div style={S.headLeft}>
             <img src="/kart-logo.png" alt="KART AI logo" style={S.logo} />
-            <div><p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p></div>
+            <div>
+              <p style={S.subtitle}>Real Prices. Real Savings. Real Time.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -105,47 +139,74 @@ function Header() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Deal card                                                           */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ card ------------------------------- */
 function DealCard({
   deal,
   editingId,
-  editItem, editStore, editStation, editLocation, editPrice, editUnit,
-  setEditItem, setEditStore, setEditStation, setEditLocation, setEditPrice, setEditUnit,
-  onStartEdit, onCancelEdit, onSave, onDelete,
+  editItem,
+  editStore,
+  editStation,
+  editLocation,
+  editPrice,
+  editUnit,
+  editCaption,
+  setEditItem,
+  setEditStore,
+  setEditStation,
+  setEditLocation,
+  setEditPrice,
+  setEditUnit,
+  setEditCaption,
+  onStartEdit,
+  onCancelEdit,
+  onSave,
+  onDelete,
 }) {
-  const perKg = deal.type === "grocery"
-    ? deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit)
-    : null;
+  const perKg =
+    deal.type === "grocery" ? deal.normalizedPerKg ?? toPerKg(deal.price, deal.unit) : null;
   const perLb = deal.type === "grocery" && perKg != null ? toPerLb(perKg, "/kg") : null;
-
-  const perL = deal.type === "gas"
-    ? deal.normalizedPerL ?? toPerL(deal.price, deal.unit)
-    : null;
+  const perL = deal.type === "gas" ? deal.normalizedPerL ?? toPerL(deal.price, deal.unit) : null;
   const perGal = deal.type === "gas" && perL != null ? toPerGal(perL, "/L") : null;
 
-  // Multi-buy display (saved as originalMultiBuy in Firestore)
-  const qty   = Number(deal.originalMultiBuy?.qty);
+  const qty = Number(deal.originalMultiBuy?.qty);
   const total = Number(deal.originalMultiBuy?.total);
-  const hasMulti = Number.isFinite(qty) && qty >= 2 && Number.isFinite(total) && total > 0;
+  const hasMulti =
+    Number.isFinite(qty) && qty >= 2 && Number.isFinite(total) && total > 0;
 
   const isEditing = editingId === deal.id;
 
   return (
     <div style={S.card}>
       <div style={S.row}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={S.badge}>{deal.type === "grocery" ? "Grocery" : "Gas"}</span>
-            {deal.station ? <span style={S.muted}>{deal.station}</span> : null}
+        <div style={{ display: "grid", gap: 8 }}>
+          {deal.imageURL && (
+            <img
+              src={deal.imageURL}
+              alt=""
+              style={{
+                maxWidth: 280,
+                maxHeight: 160,
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+                objectFit: "cover",
+              }}
+            />
+          )}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={S.badge}>
+                {deal.type === "grocery" ? "Grocery" : "Gas"}
+              </span>
+              {deal.station ? <span style={S.muted}>{deal.station}</span> : null}
+            </div>
+            <h3 style={S.h3}>{deal.item}</h3>
+            <p style={S.muted}>
+              {(deal.store || deal.station) ? `${deal.store || deal.station} · ` : ""}
+              {deal.location}
+            </p>
           </div>
-          <h3 style={S.h3}>{deal.item}</h3>
-          <p style={S.muted}>
-            {(deal.store || deal.station) ? `${deal.store || deal.station} · ` : ""}
-            {deal.location}
-          </p>
         </div>
+
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>
             {hasMulti ? (
@@ -162,7 +223,6 @@ function DealCard({
               </>
             )}
           </div>
-
           {deal.type === "grocery" && perKg != null && (
             <div style={S.muted}>≈ {money(perKg)} /kg · ≈ {money(perLb)} /lb</div>
           )}
@@ -174,6 +234,10 @@ function DealCard({
           </div>
         </div>
       </div>
+
+      {!isEditing && deal.caption ? (
+        <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{deal.caption}</p>
+      ) : null}
 
       {isEditing ? (
         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
@@ -207,7 +271,21 @@ function DealCard({
             />
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+          <textarea
+            style={{ ...S.input, minHeight: 72 }}
+            value={editCaption}
+            onChange={(e) => setEditCaption(e.target.value)}
+            placeholder="Caption / notes"
+          />
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              justifyContent: "flex-end",
+            }}
+          >
             <input
               type="text"
               value={editPrice}
@@ -221,16 +299,27 @@ function DealCard({
               style={{ ...S.input, width: 110 }}
             >
               {["/ea", "/dozen", "/lb", "/kg", "/100g", "/L", "/gal"].map((u) => (
-                <option key={u} value={u}>{u}</option>
+                <option key={u} value={u}>
+                  {u}
+                </option>
               ))}
             </select>
 
-            <button onClick={onSave} style={{ ...BTN.base, ...BTN.primary }}>Save</button>
-            <button onClick={onCancelEdit} style={{ ...BTN.base, ...BTN.secondary }}>Cancel</button>
+            <button onClick={onSave} style={{ ...BTN.base, ...BTN.primary }}>
+              Save
+            </button>
+            <button
+              onClick={onCancelEdit}
+              style={{ ...BTN.base, ...BTN.secondary }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       ) : (
-        <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div
+          style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "flex-end" }}
+        >
           <button
             onClick={() => onStartEdit(deal)}
             style={{ ...BTN.base, ...BTN.primary }}
@@ -238,7 +327,11 @@ function DealCard({
           >
             Edit
           </button>
-          <button onClick={() => onDelete(deal.id)} style={{ ...BTN.base, ...BTN.danger }} title="Delete">
+          <button
+            onClick={() => onDelete(deal.id)}
+            style={{ ...BTN.base, ...BTN.danger }}
+            title="Delete"
+          >
             Delete
           </button>
         </div>
@@ -247,9 +340,7 @@ function DealCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Deals list                                                          */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ list ------------------------------- */
 function DealsList(props) {
   const { deals } = props;
   if (!deals.length) {
@@ -264,15 +355,15 @@ function DealsList(props) {
   return (
     <div style={{ ...S.container, padding: "0 16px 24px" }}>
       <div style={S.list}>
-        {deals.map((d) => <DealCard key={d.id} deal={d} {...props} />)}
+        {deals.map((d) => (
+          <DealCard key={d.id} deal={d} {...props} />
+        ))}
       </div>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Add Deal form                                                       */
-/* ------------------------------------------------------------------ */
+/* --------------------------- add deal form -------------------------- */
 function AddDealForm({ onAdd, forcedType, prefill }) {
   const [form, setForm] = useState({
     type: "grocery",
@@ -280,17 +371,16 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
     store: "",
     station: "",
     location: "",
-    price: "",      // single-unit price (used when NOT multi-buy)
+    price: "",
     unit: "/ea",
-
-    // NEW: multi-buy fields (hidden unless enabled)
     multiEnabled: false,
-    multiQty: "",   // e.g., 2, 3, 5
-    multiTotal: "", // e.g., 5.00, 10.00
+    multiQty: "",
+    multiTotal: "",
+    caption: "",
   });
+  const [media, setMedia] = useState(null); // {url, path, width, height, mime, size}
   const [error, setError] = useState("");
 
-  // Keep your forcedType behavior (gas/grocery default + unit)
   useEffect(() => {
     if (forcedType === "grocery" || forcedType === "gas") {
       setForm((f) => ({
@@ -301,12 +391,10 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
     }
   }, [forcedType]);
 
-  // When OCR suggests fields, prefill the form (but don't overwrite user's active typing)
   useEffect(() => {
     if (!prefill) return;
     setForm((f) => ({
       ...f,
-      // only fill if empty so we don't clobber user input
       type: prefill.type ?? f.type,
       item: f.item || prefill.item || "",
       store: f.store || prefill.store || "",
@@ -314,11 +402,15 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
       location: f.location || prefill.location || "",
       unit: prefill.unit || f.unit,
       price: prefill.price != null ? String(prefill.price) : f.price,
-
-      // multi-buy
       multiEnabled: prefill.originalMultiBuy ? true : f.multiEnabled,
-      multiQty: prefill.originalMultiBuy?.qty != null ? String(prefill.originalMultiBuy.qty) : f.multiQty,
-      multiTotal: prefill.originalMultiBuy?.total != null ? String(prefill.originalMultiBuy.total) : f.multiTotal,
+      multiQty:
+        prefill.originalMultiBuy?.qty != null
+          ? String(prefill.originalMultiBuy.qty)
+          : f.multiQty,
+      multiTotal:
+        prefill.originalMultiBuy?.total != null
+          ? String(prefill.originalMultiBuy.total)
+          : f.multiTotal,
     }));
   }, [prefill]);
 
@@ -329,109 +421,99 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
 
   function handleChange(e) {
     const { name, value, type, checked } = e.target;
-    if (type === "checkbox") {
-      setForm((f) => ({ ...f, [name]: checked }));
-    } else {
-      setForm((f) => ({ ...f, [name]: value }));
-    }
+    setForm((f) => ({ ...f, [name]: type === "checkbox" ? checked : value }));
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
-    // basic validation
     if (!form.item?.trim()) return setError("Item name is required.");
-    if (form.type === "grocery" && !form.store?.trim()) {
+    if (form.type === "grocery" && !form.store?.trim())
       return setError("Store is required.");
-    }
-    if (form.type === "gas" && !form.station?.trim()) {
+    if (form.type === "gas" && !form.station?.trim())
       return setError("Station is required.");
-    }
 
-    // ----- multi-buy vs single price logic -----
     const isMulti = !!form.multiEnabled;
     const qtyNum = Number(form.multiQty);
     const totalNum = Number(form.multiTotal);
 
     if (isMulti) {
-      if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+      if (!Number.isFinite(qtyNum) || qtyNum <= 0)
         return setError("Enter a valid multi-buy quantity (e.g., 2).");
-      }
-      if (!Number.isFinite(totalNum) || totalNum <= 0) {
+      if (!Number.isFinite(totalNum) || totalNum <= 0)
         return setError("Enter a valid multi-buy total (e.g., 5.00).");
-      }
     }
 
-    let priceNum = null; // per-unit price
+    let priceNum;
     let originalMultiBuy = null;
 
     if (isMulti) {
       const perUnit = totalNum / qtyNum;
-      if (!isFinite(perUnit) || perUnit <= 0) {
+      if (!isFinite(perUnit) || perUnit <= 0)
         return setError("Multi-buy values are invalid.");
-      }
       priceNum = Number(perUnit.toFixed(4));
       originalMultiBuy = { qty: qtyNum, total: totalNum, perUnit: priceNum };
     } else {
       const p = Number(form.price);
-      if (!isFinite(p) || p <= 0) {
-        return setError("Enter a valid price.");
-      }
+      if (!isFinite(p) || p <= 0) return setError("Enter a valid price.");
       priceNum = p;
     }
 
     const toSave = {
       type: form.type,
-      item: form.item?.trim() || "",
-      store: form.store?.trim() || "",
-      station: form.station?.trim() || "",
-      location: form.location?.trim() || "",
+      item: form.item.trim(),
+      store: form.store.trim(),
+      station: form.station.trim(),
+      location: form.location.trim(),
       unit: form.unit,
       price: priceNum,
       normalizedPerKg: form.normalizedPerKg ?? null,
-      normalizedPerL:  form.normalizedPerL  ?? null,
-      originalMultiBuy, // <-- keep bundle
+      normalizedPerL: form.normalizedPerL ?? null,
+      originalMultiBuy,
+      caption: (form.caption || "").trim(),
+      imageURL: media?.url || "",
+      imagePath: media?.path || "",
+      imageWidth: media?.width || null,
+      imageHeight: media?.height || null,
     };
 
-    try {
-      await onAdd(toSave);
-      // reset
-      setForm({
-        type:
-          forcedType === "grocery" || forcedType === "gas"
-            ? forcedType
-            : "grocery",
-        item: "",
-        store: "",
-        station: "",
-        location: "",
-        price: "",
-        unit: forcedType === "gas" ? "/L" : "/ea",
-        multiEnabled: false,
-        multiQty: "",
-        multiTotal: "",
-      });
-      setError("");
-    } catch (err) {
-      console.error("Error adding deal:", err);
-      setError("Failed to save. Try again.");
-    }
+    await onAdd(toSave);
+
+    setForm({
+      type:
+        forcedType === "grocery" || forcedType === "gas"
+          ? forcedType
+          : "grocery",
+      item: "",
+      store: "",
+      station: "",
+      location: "",
+      price: "",
+      unit: forcedType === "gas" ? "/L" : "/ea",
+      multiEnabled: false,
+      multiQty: "",
+      multiTotal: "",
+      caption: "",
+    });
+    setMedia(null);
   }
 
   return (
     <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
       <div style={S.form}>
-        {/* Item */}
         <input
           name="item"
           value={form.item}
           onChange={handleChange}
-          placeholder={form.type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Chicken Thighs)"}
+          placeholder={
+            form.type === "gas"
+              ? "Fuel (e.g., Regular Unleaded)"
+              : "Item (e.g., Chicken Thighs)"
+          }
           style={{ ...S.input, gridColumn: "span 3" }}
         />
 
-        {/* Store / Station */}
         {form.type === "grocery" ? (
           <input
             name="store"
@@ -450,7 +532,6 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
           />
         )}
 
-        {/* Location */}
         <input
           name="location"
           value={form.location}
@@ -459,7 +540,6 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
           style={{ ...S.input, gridColumn: "span 3" }}
         />
 
-        {/* Unit */}
         <select
           name="unit"
           value={form.unit}
@@ -467,12 +547,21 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
           style={{ ...S.input, gridColumn: "span 1" }}
         >
           {unitOptions.map((u) => (
-            <option key={u} value={u}>{u}</option>
+            <option key={u} value={u}>
+              {u}
+            </option>
           ))}
         </select>
 
-        {/* Toggle: Multi-buy? */}
-        <label style={{ display: "flex", alignItems: "center", gap: 8, gridColumn: "span 3", fontSize: 14 }}>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            gridColumn: "span 3",
+            fontSize: 14,
+          }}
+        >
           <input
             type="checkbox"
             name="multiEnabled"
@@ -482,7 +571,6 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
           Multi-buy deal? (e.g., 2 for $5)
         </label>
 
-        {/* Multi-buy inputs (shown only if enabled) */}
         {form.multiEnabled ? (
           <>
             <input
@@ -500,8 +588,16 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
               style={{ ...S.input, gridColumn: "span 2" }}
             />
             {Number(form.multiQty) > 0 && Number(form.multiTotal) > 0 ? (
-              <div style={{ alignSelf: "center", fontSize: 12, color: "#6b7280", gridColumn: "span 2" }}>
-                ≈ {(Number(form.multiTotal) / Number(form.multiQty)).toFixed(2)} per unit
+              <div
+                style={{
+                  alignSelf: "center",
+                  fontSize: 12,
+                  color: "#6b7280",
+                  gridColumn: "span 2",
+                }}
+              >
+                ≈ {(Number(form.multiTotal) / Number(form.multiQty)).toFixed(2)} per
+                unit
               </div>
             ) : (
               <div style={{ gridColumn: "span 2" }} />
@@ -516,9 +612,21 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
             style={{ ...S.input, gridColumn: "span 1" }}
           />
         )}
-      </div>
 
-      {error && <p style={S.error}>{error}</p>}
+        {/* Caption */}
+        <textarea
+          name="caption"
+          value={form.caption}
+          onChange={handleChange}
+          placeholder="Add a caption or notes (optional)…"
+          style={{ ...S.input, gridColumn: "1 / -1", minHeight: 72, resize: "vertical" }}
+        />
+
+        {/* Photo uploader */}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <MediaUploader onUploaded={setMedia} defaultPreview={media?.url || ""} />
+        </div>
+      </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
         <button
@@ -538,7 +646,9 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
               multiEnabled: false,
               multiQty: "",
               multiTotal: "",
+              caption: "",
             });
+            setMedia(null);
           }}
           style={{ ...BTN.base, ...BTN.neutral }}
         >
@@ -551,45 +661,42 @@ function AddDealForm({ onAdd, forcedType, prefill }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* App                                                                 */
-/* ------------------------------------------------------------------ */
+/* -------------------------------- App ------------------------------- */
 export default function App() {
-  // persist deals to localStorage
+  // persist deals to localStorage (cheap cache)
   const [deals, setDeals] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("kart-deals") || "[]"); } catch { return []; }
+    try {
+      return JSON.parse(localStorage.getItem("kart-deals") || "[]");
+    } catch {
+      return [];
+    }
   });
-  useEffect(() => { try { localStorage.setItem("kart-deals", JSON.stringify(deals)); } catch {} }, [deals]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("kart-deals", JSON.stringify(deals));
+    } catch {}
+  }, [deals]);
 
   const dealsCol = collection(db, "deals");
 
-  /* -------- Firestore helpers -------- */
+  // If you want deterministic IDs instead, replace with: return upsertDeal(deal);
   async function createDeal(deal) {
-    try {
-      const ref = await addDoc(dealsCol, {
-        ...deal,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      await getDoc(ref);
-      return ref.id;
-    } catch (err) {
-      console.error("[createDeal] FAILED:", err?.code, err?.message, err);
-      throw err;
-    }
+    const ref = await addDoc(dealsCol, {
+      ...deal,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await getDoc(ref);
+    return ref.id;
   }
-
   async function updateDealFS(id, updates) {
-    const ref = doc(dealsCol, id);
-    await updateDoc(ref, { ...updates, updatedAt: serverTimestamp() });
+    await updateDoc(doc(dealsCol, id), { ...updates, updatedAt: serverTimestamp() });
   }
-
   async function removeDeal(id) {
-    const ref = doc(dealsCol, id);
-    await deleteDoc(ref);
+    await deleteDoc(doc(dealsCol, id));
   }
 
-  /* -------- Live subscription to Firestore -------- */
+  // live subscription
   useEffect(() => {
     const qy = query(dealsCol, orderBy("updatedAt", "desc"));
     const unsub = onSnapshot(
@@ -608,11 +715,12 @@ export default function App() {
             price: data.price ?? 0,
             normalizedPerKg: data.normalizedPerKg ?? null,
             normalizedPerL: data.normalizedPerL ?? null,
-
-            // >>> IMPORTANT: bring originalMultiBuy from Firestore <<<
             originalMultiBuy: data.originalMultiBuy ?? null,
-
-            // convert Firestore Timestamp -> JS Date
+            caption: data.caption ?? "",
+            imageURL: data.imageURL || "",
+            imagePath: data.imagePath || "",
+            imageWidth: data.imageWidth || null,
+            imageHeight: data.imageHeight || null,
             createdAt: toJsDate(data.createdAt) ?? null,
             updatedAt: toJsDate(data.updatedAt) ?? null,
           };
@@ -622,9 +730,9 @@ export default function App() {
       (err) => console.error("onSnapshot error:", err)
     );
     return () => unsub();
-  }, []); // subscribe once
+  }, []);
 
-  /* -------- Search / sort UI state -------- */
+  // search/sort/filter
   const [queryText, setQueryText] = useState(() => localStorage.getItem("kart-query") || "");
   const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortby") || "newest");
   const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
@@ -632,7 +740,7 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("kart-sortby", sortBy); } catch {} }, [sortBy]);
   useEffect(() => { try { localStorage.setItem("kart-typeFilter", typeFilter); } catch {} }, [typeFilter]);
 
-  /* -------- Inline edit state -------- */
+  // inline edit
   const [editingId, setEditingId] = useState(null);
   const [editItem, setEditItem] = useState("");
   const [editStore, setEditStore] = useState("");
@@ -640,24 +748,18 @@ export default function App() {
   const [editLocation, setEditLocation] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editUnit, setEditUnit] = useState("/ea");
+  const [editCaption, setEditCaption] = useState("");
 
-  // --- Smart Assist (OCR) draft coming from OCRScan (future prefill) ---
+  // ocr prefill stub (wire later)
   const [ocrDraft, setOcrDraft] = useState(null);
 
-  /* -------- Handlers -------- */
   async function handleAdd(newDeal) {
-    try {
-      await createDeal(newDeal); // Firestore writes; UI updates via onSnapshot
-    } catch (err) {
-      console.error("add failed:", err);
-    }
+    await createDeal(newDeal);
   }
-
   async function handleDelete(id) {
     await removeDeal(id);
     if (id === editingId) handleCancelEdit();
   }
-
   function handleStartEdit(deal) {
     setEditingId(deal.id);
     setEditItem(deal.item || "");
@@ -666,8 +768,8 @@ export default function App() {
     setEditLocation(deal.location || "");
     setEditPrice(String(deal.price));
     setEditUnit(deal.unit);
+    setEditCaption(deal.caption || "");
   }
-
   function handleCancelEdit() {
     setEditingId(null);
     setEditItem("");
@@ -676,24 +778,23 @@ export default function App() {
     setEditLocation("");
     setEditPrice("");
     setEditUnit("/ea");
+    setEditCaption("");
   }
-
   async function handleSave() {
     if (!editingId) return;
-
     const newItem = editItem.trim();
     const newStore = editStore.trim();
     const newStation = editStation.trim();
     const newLocation = editLocation.trim();
+    const newCaption = editCaption.trim();
     const newPrice = Number(editPrice);
     const newUnit = editUnit.trim();
-
     if (!newItem) return;
     if (!Number.isFinite(newPrice) || newPrice <= 0) return;
 
     const current = deals.find((d) => d.id === editingId);
-    let normalizedPerKg = null;
-    let normalizedPerL = null;
+    let normalizedPerKg = null,
+      normalizedPerL = null;
     if (current?.type === "grocery") normalizedPerKg = toPerKg(newPrice, newUnit);
     if (current?.type === "gas") normalizedPerL = toPerL(newPrice, newUnit);
 
@@ -706,9 +807,8 @@ export default function App() {
       unit: newUnit,
       normalizedPerKg,
       normalizedPerL,
-      // NOTE: leaving originalMultiBuy unchanged during inline edit for now
+      caption: newCaption,
     });
-
     handleCancelEdit();
   }
 
@@ -720,31 +820,37 @@ export default function App() {
 
     if (q) {
       out = out.filter((d) =>
-        [d.item, d.store, d.station, d.location].some((v) => (v || "").toLowerCase().includes(q))
+        [d.item, d.store, d.station, d.location, d.caption].some((v) =>
+          (v || "").toLowerCase().includes(q)
+        )
       );
     }
 
     switch (sortBy) {
       case "price-asc":
         out.sort((a, b) => {
-          const aNorm = a.type === "grocery"
-            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
-            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
-          const bNorm = b.type === "grocery"
-            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
-            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
-          return (aNorm ?? Infinity) - (bNorm ?? Infinity);
+          const aN =
+            a.type === "grocery"
+              ? a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price
+              : a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price;
+          const bN =
+            b.type === "grocery"
+              ? b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price
+              : b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price;
+          return (aN ?? Infinity) - (bN ?? Infinity);
         });
         break;
       case "price-desc":
         out.sort((a, b) => {
-          const aNorm = a.type === "grocery"
-            ? (a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price)
-            : (a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price);
-          const bNorm = b.type === "grocery"
-            ? (b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price)
-            : (b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price);
-          return (bNorm ?? -Infinity) - (aNorm ?? -Infinity);
+          const aN =
+            a.type === "grocery"
+              ? a.normalizedPerKg ?? toPerKg(a.price, a.unit) ?? a.price
+              : a.normalizedPerL ?? toPerL(a.price, a.unit) ?? a.price;
+          const bN =
+            b.type === "grocery"
+              ? b.normalizedPerKg ?? toPerKg(b.price, b.unit) ?? b.price
+              : b.normalizedPerL ?? toPerL(b.price, b.unit) ?? b.price;
+          return (bN ?? -Infinity) - (aN ?? -Infinity);
         });
         break;
       case "alpha":
@@ -752,18 +858,19 @@ export default function App() {
         break;
       case "newest":
       default:
-        out.sort((a, b) => {
-          const aT = (a.updatedAt || a.createdAt || 0)?.valueOf?.() ?? 0;
-          const bT = (b.updatedAt || b.createdAt || 0)?.valueOf?.() ?? 0;
-          return bT - aT;
-        });
+        out.sort(
+          (a, b) =>
+            ((b.updatedAt || b.createdAt || 0)?.valueOf?.() ?? 0) -
+            ((a.updatedAt || a.createdAt || 0)?.valueOf?.() ?? 0)
+        );
         break;
     }
 
     return out;
   }, [deals, queryText, sortBy, typeFilter]);
 
-  const forcedType = typeFilter === "grocery" || typeFilter === "gas" ? typeFilter : null;
+  const forcedType =
+    typeFilter === "grocery" || typeFilter === "gas" ? typeFilter : null;
 
   function handleResetAll() {
     setQueryText("");
@@ -790,9 +897,15 @@ export default function App() {
               style={{
                 ...BTN.base,
                 ...(typeFilter === "grocery" ? BTN.primary : BTN.secondary),
-                width: 40, height: 40, padding: 0,
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                border: `${typeFilter === "grocery" ? 2 : 1}px solid ${typeFilter === "grocery" ? BRAND.green : BRAND.grayBorder}`,
+                width: 40,
+                height: 40,
+                padding: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `${
+                  typeFilter === "grocery" ? 2 : 1
+                }px solid ${typeFilter === "grocery" ? BRAND.green : BRAND.grayBorder}`,
                 background: BRAND.white,
               }}
               title="Show grocery deals"
@@ -802,10 +915,17 @@ export default function App() {
             <button
               onClick={() => setTypeFilter("gas")}
               style={{
-                ...BTN.base, ...BTN.secondary,
-                width: 40, height: 40, padding: 0,
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                border: `${typeFilter === "gas" ? 2 : 1}px solid ${typeFilter === "gas" ? BRAND.green : BRAND.grayBorder}`,
+                ...BTN.base,
+                ...BTN.secondary,
+                width: 40,
+                height: 40,
+                padding: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `${
+                  typeFilter === "gas" ? 2 : 1
+                }px solid ${typeFilter === "gas" ? BRAND.green : BRAND.grayBorder}`,
                 background: BRAND.white,
               }}
               title="Show gas deals"
@@ -822,25 +942,30 @@ export default function App() {
           </div>
 
           <div style={S.right}>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={S.input} title="Sort">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              style={S.input}
+              title="Sort"
+            >
               <option value="newest">Newest</option>
               <option value="price-asc">Price (Low → High)</option>
               <option value="price-desc">Price (High → Low)</option>
               <option value="alpha">A → Z</option>
             </select>
 
-            <button onClick={handleResetAll} style={{ ...BTN.base, ...BTN.neutral }} title="Clear search, filters, sort">
+            <button
+              onClick={handleResetAll}
+              style={{ ...BTN.base, ...BTN.neutral }}
+              title="Clear search, filters, sort"
+            >
               Reset
             </button>
           </div>
         </div>
       </div>
 
-      <AddDealForm
-        onAdd={handleAdd}
-        forcedType={forcedType}
-        prefill={null /* ocrDraft wire-up soon */}
-      />
+      <AddDealForm onAdd={handleAdd} forcedType={forcedType} prefill={null /* wire OCR later */} />
 
       <DealsList
         deals={filtered}
@@ -853,12 +978,14 @@ export default function App() {
         editLocation={editLocation}
         editPrice={editPrice}
         editUnit={editUnit}
+        editCaption={editCaption}
         setEditItem={setEditItem}
         setEditStore={setEditStore}
         setEditStation={setEditStation}
         setEditLocation={setEditLocation}
         setEditPrice={setEditPrice}
         setEditUnit={setEditUnit}
+        setEditCaption={setEditCaption}
         onStartEdit={handleStartEdit}
         onCancelEdit={handleCancelEdit}
         onSave={handleSave}
@@ -866,11 +993,10 @@ export default function App() {
 
       {/* OCR Scan Section */}
       <div style={{ ...S.container, padding: "16px 0" }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-          Smart Assist – OCR
-        </h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Smart Assist – OCR</h2>
         <OCRScan onSuggest={setOcrDraft} />
       </div>
+      <ToastHost/>
     </div>
   );
 } 

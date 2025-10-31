@@ -1,26 +1,23 @@
 // src/firebaseClient.js
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAnalytics } from "firebase/analytics";
+import { getStorage } from "firebase/storage";
 
-// ⬇️ Paste YOUR real config from Firebase console here
 const firebaseConfig = {
-  apiKey: "AIzaSyC3w7AkG9tdW9-VPbkN_B9B0yzzKLDLz9E",
-  authDomain: "kart-ai-914b8.firebaseapp.com",       // e.g. kart-ai.firebaseapp.com
-  projectId: "kart-ai-914b8",             // must match your project id
-  storageBucket: "kart-ai-914b8.firebasestorage.app",     // e.g. kart-ai.appspot.com
-  messagingSenderId: "642735553778",
-  appId: "1:642735553778:web:a89f6576438a755505a46b",
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID",
 };
 
-// Avoid duplicate init during Vite hot-reload
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const app = initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
+export const storage = getStorage(app); // ✅ required for MediaUploader
 
-// TEMP: prove we’re pointed to the right Firebase project
-console.log("Firebase connected:", app.options.projectId); 
+export default app; 
 
 
 
