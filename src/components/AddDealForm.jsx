@@ -1,170 +1,261 @@
 // src/components/AddDealForm.jsx
-import React, { useEffect, useState } from "react";
-import { saveOrUpdateDeal, makeDealId } from "../services/firestoreDeals";
-import MediaUploader from "./MediaUploader";
+import React, { useState } from "react";
+import { addDeal } from "../services/firestoreDeals";
 
-export default function AddDealForm({
-  // optional prefill from OCR Smart Assist
-  initial = {
-    type: "grocery",           // "grocery" | "gas"
-    item: "",
-    store: "",
-    station: "",
-    location: "",
-    unit: "/ea",
-    price: "",
-    imageUrl: "",              // allow prefill
-    description: "",           // allow prefill
-  },
-  currentUser,                 // { uid, displayName }  (pass from app-level auth)
-  onSaved,                     // callback(deal)
-}) {
-  const [type, setType] = useState(initial.type || "grocery");
-  const [item, setItem] = useState(initial.item || "");
-  const [store, setStore] = useState(initial.store || "");
-  const [station, setStation] = useState(initial.station || "");
-  const [location, setLocation] = useState(initial.location || "");
-  const [unit, setUnit] = useState(initial.unit || "/ea");
-  const [price, setPrice] = useState(initial.price ?? "");
-  const [imageUrl, setImageUrl] = useState(initial.imageUrl || "");
-  const [description, setDescription] = useState(initial.description || "");
+// tiny helper so we never get stuck in "Adding…"
+const withTimeout = (p, ms = 8000) =>
+  Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error("Timed out")), ms)),
+  ]);
+
+export default function AddDealForm({ onAdd }) {
+  const [item, setItem] = useState("");
+  const [store, setStore] = useState("");
+  const [location, setLocation] = useState("");
+  const [unit, setUnit] = useState("/ea");
+  const [price, setPrice] = useState("");
+  const [caption, setCaption] = useState("");
+  const [multiEnabled, setMultiEnabled] = useState(false);
+  const [multiTotal, setMultiTotal] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setType(initial.type || "grocery");
-    setItem(initial.item || "");
-    setStore(initial.store || "");
-    setStation(initial.station || "");
-    setLocation(initial.location || "");
-    setUnit(initial.unit || "/ea");
-    setPrice(initial.price ?? "");
-    setImageUrl(initial.imageUrl || "");
-    setDescription(initial.description || "");
-  }, [initial]);
 
   const canSave =
-    (type === "gas" ? station || store : item || store) &&
-    String(price).trim().length > 0;
+    item.trim() &&
+    store.trim() &&
+    location.trim() &&
+    price !== "" &&
+    !Number.isNaN(Number(price));
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-    if (!canSave) return;
-
+  async function handleUseMyLocation() {
     try {
-      setSaving(true);
-      const deal = {
-        type,
-        item: item.trim(),
-        store: store.trim(),
-        station: station.trim(),
-        location: location.trim(),
-        unit: unit.trim() || "/ea",
-        price: Number(price),
-        imageUrl: imageUrl || "",
-        description: description.trim(),
-        createdBy: currentUser?.uid || null,
-        createdByName: currentUser?.displayName || null,
-      };
-      // deterministic id prevents duplicates on same logical deal
-      const id = makeDealId(deal);
-      const saved = await saveOrUpdateDeal({ ...deal, id });
-      setSaving(false);
-      if (onSaved) onSaved(saved);
-      // simple reset (keep image to let user post multiple similar deals if they want)
-      // remove this line if you prefer full reset:
-      // setImageUrl("");
-    } catch (err) {
-      console.error(err);
-      setSaving(false);
-      setError("Could not save deal. Please try again.");
+      if (!navigator.geolocation) return alert("Geolocation not supported.");
+      const pos = await new Promise((res, rej) =>
+        navigator.geolocation.getCurrentPosition(res, rej, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+        })
+      );
+      const { latitude, longitude } = pos.coords;
+      setLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+    } catch (e) {
+      console.error("Location error:", e);
+      alert("Could not get your location.");
     }
   }
 
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!canSave || saving) return;
+
+    setSaving(true);
+    try {
+      const payload = {
+        type: "grocery",
+        item: item.trim(),
+        store: store.trim(),
+        location: location.trim(),
+        unit: unit || "/ea",
+        price: Number(price),
+        caption: caption.trim() || "",
+        multiEnabled: !!multiEnabled,
+        multiTotal: multiEnabled ? Number(multiTotal || 0) : 0,
+      };
+
+      const id = await withTimeout(addDeal(payload)); // 🔒 never hang
+      console.log("✅ Wrote /deals/", id);
+      onAdd && onAdd(id, payload);
+
+      // reset
+      setItem("");
+      setStore("");
+      setLocation("");
+      setUnit("/ea");
+      setPrice("");
+      setCaption("");
+      setMultiEnabled(false);
+      setMultiTotal("");
+    } catch (err) {
+      console.error("Add deal failed:", err);
+      alert("Failed to add deal: " + (err?.message || err));
+    } finally {
+      setSaving(false); // ✅ always clears "Adding…"
+    }
+  }
+
+  function handleReset() {
+    setItem("");
+    setStore("");
+    setLocation("");
+    setUnit("/ea");
+    setPrice("");
+    setCaption("");
+    setMultiEnabled(false);
+    setMultiTotal("");
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="flex gap-2">
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          className="border rounded px-2 py-1"
-          title="Deal type"
-        >
-          <option value="grocery">Grocery</option>
-          <option value="gas">Gas</option>
-        </select>
+    <form onSubmit={handleSubmit} style={styles.card}>
+      {/* 2-column responsive grid so the form doesn’t stretch */}
+      <div style={styles.grid}>
         <input
+          placeholder="Item (e.g., Chicken Thighs)"
           value={item}
           onChange={(e) => setItem(e.target.value)}
-          placeholder={type === "gas" ? "Fuel (e.g., Regular Unleaded)" : "Item (e.g., Smarties)"}
-          className="border rounded px-2 py-1 flex-1"
+          style={styles.input}
         />
         <input
-          value={type === "gas" ? station : store}
-          onChange={(e) => (type === "gas" ? setStation(e.target.value) : setStore(e.target.value))}
-          placeholder={type === "gas" ? "Station (e.g., Esso)" : "Store (e.g., Food Basics)"}
-          className="border rounded px-2 py-1 flex-1"
+          placeholder="Store (e.g., Frescho)"
+          value={store}
+          onChange={(e) => setStore(e.target.value)}
+          style={styles.input}
         />
-      </div>
 
-      <div className="flex gap-2">
-        <input
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          placeholder="Location (City, Prov/State)"
-          className="border rounded px-2 py-1 flex-1"
-        />
-        <input
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          placeholder={type === "gas" ? "Price (¢/L e.g., 144.9)" : "Price (e.g., 1.99)"}
-          className="border rounded px-2 py-1 w-40"
-          inputMode="decimal"
-        />
-        <input
-          value={unit}
-          onChange={(e) => setUnit(e.target.value)}
-          placeholder="Unit (/ea, /kg, /L…)"
-          className="border rounded px-2 py-1 w-28"
-        />
-      </div>
-
-      {/* Photo uploader */}
-      <div className="flex items-start gap-3">
-        <MediaUploader
-          onUploaded={(url) => setImageUrl(url)}
-          initialUrl={imageUrl}
-          buttonLabel={imageUrl ? "Replace photo" : "Upload photo"}
-        />
-        {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt="deal"
-            className="border rounded max-h-24"
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            placeholder="Location (City, Province/State)"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            style={{ ...styles.input, flex: 1 }}
           />
-        ) : null}
+          <button
+            type="button"
+            aria-label="Use my location"
+            title="Use my location"
+            onClick={handleUseMyLocation}
+            style={styles.pill}
+          >
+            <span style={{ marginRight: 4 }}>📍</span> Use my location
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <select
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            style={{ ...styles.input, maxWidth: 110 }}
+          >
+            <option value="/ea">/ea</option>
+            <option value="/lb">/lb</option>
+            <option value="/kg">/kg</option>
+            <option value="/L">/L</option>
+          </select>
+
+          <label style={styles.checkboxWrap}>
+            <input
+              type="checkbox"
+              checked={multiEnabled}
+              onChange={(e) => setMultiEnabled(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Multi-buy? (e.g., 2 for $5)
+          </label>
+
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="Price (e.g., 4.99)"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            style={{ ...styles.input, maxWidth: 160 }}
+          />
+        </div>
+
+        {multiEnabled && (
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="Multi total price (e.g., 5.00)"
+            value={multiTotal}
+            onChange={(e) => setMultiTotal(e.target.value)}
+            style={{ ...styles.input, maxWidth: 220 }}
+          />
+        )}
+
+        <input
+          placeholder="Add a caption or notes (optional)…"
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          style={{ ...styles.input, gridColumn: "1 / -1" }}
+        />
       </div>
 
-      {/* Caption / notes */}
-      <textarea
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Caption / notes (optional)"
-        className="border rounded px-2 py-1 w-full min-h-[80px]"
-      />
-
-      {error ? <div className="text-red-600 text-sm">{error}</div> : null}
-
-      <div className="flex gap-2">
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+        <button type="button" onClick={handleReset} style={styles.btnGhost}>
+          Reset
+        </button>
         <button
           type="submit"
           disabled={!canSave || saving}
-          className="border rounded px-3 py-1 bg-black text-white disabled:opacity-50"
+          style={{
+            ...styles.btnPrimary,
+            opacity: !canSave || saving ? 0.65 : 1,
+            cursor: !canSave || saving ? "not-allowed" : "pointer",
+          }}
+          title={canSave ? "Add deal" : "Fill required fields first"}
         >
-          {saving ? "Posting…" : "Post deal"}
+          {saving ? "Adding…" : "Add"}
         </button>
       </div>
     </form>
   );
-} 
+}
+
+const styles = {
+  card: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: "14px 16px",
+    background: "#fff",
+    marginTop: 8,
+    maxWidth: 1000,      // ✅ keeps form from spanning the whole page
+    marginInline: "auto",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+    marginBottom: 12,
+  },
+  input: {
+    height: 40,
+    padding: "8px 12px",
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    outline: "none",
+    width: "100%",
+  },
+  pill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    height: 40,
+    padding: "0 12px",
+    borderRadius: 999,
+    border: "1px solid #e5e7eb",
+    background: "#f9fafb",
+    fontSize: 13,
+    whiteSpace: "nowrap",
+  },
+  checkboxWrap: { display: "flex", alignItems: "center", gap: 6 },
+  btnPrimary: {
+    height: 40,
+    padding: "0 16px",
+    borderRadius: 10,
+    border: "1px solid #0ea5e9",
+    background: "#0ea5e9",
+    color: "#fff",
+    fontWeight: 600,
+  },
+  btnGhost: {
+    height: 40,
+    padding: "0 16px",
+    borderRadius: 10,
+    border: "1px solid #e5e7eb",
+    background: "#fff",
+  },
+}

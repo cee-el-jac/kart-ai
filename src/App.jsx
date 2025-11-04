@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import ToastHost from "./components/ToastHost"; 
+import ToastHost from "./components/ToastHost";
 import OCRScan from "./components/OCRScan";
-import MediaUploader from "./components/MediaUploader";
+import AddDealForm from "./components/AddDealForm"; // ← external form component
+import MediaUploader from "./components/MediaUploader"; // (used by DealCard image preview if needed)
 import { toPerKg, toPerLb, toPerL, toPerGal, money } from "./utils/conversions";
 import { db } from "./firebaseClient";
 import {
@@ -15,9 +16,8 @@ import {
   serverTimestamp,
   query,
   orderBy,
+  getDocs,
 } from "firebase/firestore";
-// NOTE: if you prefer deterministic IDs, you can import upsertDeal and use it in createDeal()
-// import { upsertDeal } from "./services/firestoreDeals";
 
 /* ----------------------------- helpers ----------------------------- */
 function toJsDate(ts) {
@@ -142,24 +142,7 @@ function Header() {
 /* ------------------------------ card ------------------------------- */
 function DealCard({
   deal,
-  editingId,
-  editItem,
-  editStore,
-  editStation,
-  editLocation,
-  editPrice,
-  editUnit,
-  editCaption,
-  setEditItem,
-  setEditStore,
-  setEditStation,
-  setEditLocation,
-  setEditPrice,
-  setEditUnit,
-  setEditCaption,
   onStartEdit,
-  onCancelEdit,
-  onSave,
   onDelete,
 }) {
   const perKg =
@@ -172,8 +155,6 @@ function DealCard({
   const total = Number(deal.originalMultiBuy?.total);
   const hasMulti =
     Number.isFinite(qty) && qty >= 2 && Number.isFinite(total) && total > 0;
-
-  const isEditing = editingId === deal.id;
 
   return (
     <div style={S.card}>
@@ -234,108 +215,6 @@ function DealCard({
           </div>
         </div>
       </div>
-
-      {!isEditing && deal.caption ? (
-        <p style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{deal.caption}</p>
-      ) : null}
-
-      {isEditing ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              style={{ ...S.input, flex: 1 }}
-              value={editItem}
-              onChange={(e) => setEditItem(e.target.value)}
-              placeholder="Item"
-            />
-            {deal.type === "grocery" ? (
-              <input
-                style={{ ...S.input, width: 200 }}
-                value={editStore}
-                onChange={(e) => setEditStore(e.target.value)}
-                placeholder="Store"
-              />
-            ) : (
-              <input
-                style={{ ...S.input, width: 200 }}
-                value={editStation}
-                onChange={(e) => setEditStation(e.target.value)}
-                placeholder="Station"
-              />
-            )}
-            <input
-              style={{ ...S.input, width: 220 }}
-              value={editLocation}
-              onChange={(e) => setEditLocation(e.target.value)}
-              placeholder="Location"
-            />
-          </div>
-
-          <textarea
-            style={{ ...S.input, minHeight: 72 }}
-            value={editCaption}
-            onChange={(e) => setEditCaption(e.target.value)}
-            placeholder="Caption / notes"
-          />
-
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              justifyContent: "flex-end",
-            }}
-          >
-            <input
-              type="text"
-              value={editPrice}
-              onChange={(e) => setEditPrice(e.target.value)}
-              placeholder="Price"
-              style={{ ...S.input, width: 110 }}
-            />
-            <select
-              value={editUnit}
-              onChange={(e) => setEditUnit(e.target.value)}
-              style={{ ...S.input, width: 110 }}
-            >
-              {["/ea", "/dozen", "/lb", "/kg", "/100g", "/L", "/gal"].map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-
-            <button onClick={onSave} style={{ ...BTN.base, ...BTN.primary }}>
-              Save
-            </button>
-            <button
-              onClick={onCancelEdit}
-              style={{ ...BTN.base, ...BTN.secondary }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div
-          style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "flex-end" }}
-        >
-          <button
-            onClick={() => onStartEdit(deal)}
-            style={{ ...BTN.base, ...BTN.primary }}
-            title="Edit"
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => onDelete(deal.id)}
-            style={{ ...BTN.base, ...BTN.danger }}
-            title="Delete"
-          >
-            Delete
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -363,307 +242,9 @@ function DealsList(props) {
   );
 }
 
-/* --------------------------- add deal form -------------------------- */
-function AddDealForm({ onAdd, forcedType, prefill }) {
-  const [form, setForm] = useState({
-    type: "grocery",
-    item: "",
-    store: "",
-    station: "",
-    location: "",
-    price: "",
-    unit: "/ea",
-    multiEnabled: false,
-    multiQty: "",
-    multiTotal: "",
-    caption: "",
-  });
-  const [media, setMedia] = useState(null); // {url, path, width, height, mime, size}
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (forcedType === "grocery" || forcedType === "gas") {
-      setForm((f) => ({
-        ...f,
-        type: forcedType,
-        unit: forcedType === "grocery" ? "/ea" : "/L",
-      }));
-    }
-  }, [forcedType]);
-
-  useEffect(() => {
-    if (!prefill) return;
-    setForm((f) => ({
-      ...f,
-      type: prefill.type ?? f.type,
-      item: f.item || prefill.item || "",
-      store: f.store || prefill.store || "",
-      station: f.station || prefill.station || "",
-      location: f.location || prefill.location || "",
-      unit: prefill.unit || f.unit,
-      price: prefill.price != null ? String(prefill.price) : f.price,
-      multiEnabled: prefill.originalMultiBuy ? true : f.multiEnabled,
-      multiQty:
-        prefill.originalMultiBuy?.qty != null
-          ? String(prefill.originalMultiBuy.qty)
-          : f.multiQty,
-      multiTotal:
-        prefill.originalMultiBuy?.total != null
-          ? String(prefill.originalMultiBuy.total)
-          : f.multiTotal,
-    }));
-  }, [prefill]);
-
-  const unitOptions =
-    form.type === "grocery"
-      ? ["/ea", "/dozen", "/lb", "/kg", "/100g"]
-      : ["/L", "/gal"];
-
-  function handleChange(e) {
-    const { name, value, type, checked } = e.target;
-    setForm((f) => ({ ...f, [name]: type === "checkbox" ? checked : value }));
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-
-    if (!form.item?.trim()) return setError("Item name is required.");
-    if (form.type === "grocery" && !form.store?.trim())
-      return setError("Store is required.");
-    if (form.type === "gas" && !form.station?.trim())
-      return setError("Station is required.");
-
-    const isMulti = !!form.multiEnabled;
-    const qtyNum = Number(form.multiQty);
-    const totalNum = Number(form.multiTotal);
-
-    if (isMulti) {
-      if (!Number.isFinite(qtyNum) || qtyNum <= 0)
-        return setError("Enter a valid multi-buy quantity (e.g., 2).");
-      if (!Number.isFinite(totalNum) || totalNum <= 0)
-        return setError("Enter a valid multi-buy total (e.g., 5.00).");
-    }
-
-    let priceNum;
-    let originalMultiBuy = null;
-
-    if (isMulti) {
-      const perUnit = totalNum / qtyNum;
-      if (!isFinite(perUnit) || perUnit <= 0)
-        return setError("Multi-buy values are invalid.");
-      priceNum = Number(perUnit.toFixed(4));
-      originalMultiBuy = { qty: qtyNum, total: totalNum, perUnit: priceNum };
-    } else {
-      const p = Number(form.price);
-      if (!isFinite(p) || p <= 0) return setError("Enter a valid price.");
-      priceNum = p;
-    }
-
-    const toSave = {
-      type: form.type,
-      item: form.item.trim(),
-      store: form.store.trim(),
-      station: form.station.trim(),
-      location: form.location.trim(),
-      unit: form.unit,
-      price: priceNum,
-      normalizedPerKg: form.normalizedPerKg ?? null,
-      normalizedPerL: form.normalizedPerL ?? null,
-      originalMultiBuy,
-      caption: (form.caption || "").trim(),
-      imageURL: media?.url || "",
-      imagePath: media?.path || "",
-      imageWidth: media?.width || null,
-      imageHeight: media?.height || null,
-    };
-
-    await onAdd(toSave);
-
-    setForm({
-      type:
-        forcedType === "grocery" || forcedType === "gas"
-          ? forcedType
-          : "grocery",
-      item: "",
-      store: "",
-      station: "",
-      location: "",
-      price: "",
-      unit: forcedType === "gas" ? "/L" : "/ea",
-      multiEnabled: false,
-      multiQty: "",
-      multiTotal: "",
-      caption: "",
-    });
-    setMedia(null);
-  }
-
-  return (
-    <form onSubmit={handleSubmit} style={{ ...S.container, padding: "0 16px 12px" }}>
-      <div style={S.form}>
-        <input
-          name="item"
-          value={form.item}
-          onChange={handleChange}
-          placeholder={
-            form.type === "gas"
-              ? "Fuel (e.g., Regular Unleaded)"
-              : "Item (e.g., Chicken Thighs)"
-          }
-          style={{ ...S.input, gridColumn: "span 3" }}
-        />
-
-        {form.type === "grocery" ? (
-          <input
-            name="store"
-            value={form.store}
-            onChange={handleChange}
-            placeholder="Store (e.g., Costco)"
-            style={{ ...S.input, gridColumn: "span 2" }}
-          />
-        ) : (
-          <input
-            name="station"
-            value={form.station}
-            onChange={handleChange}
-            placeholder="Station (e.g., Shell)"
-            style={{ ...S.input, gridColumn: "span 2" }}
-          />
-        )}
-
-        <input
-          name="location"
-          value={form.location}
-          onChange={handleChange}
-          placeholder="Location (City, State/Province)"
-          style={{ ...S.input, gridColumn: "span 3" }}
-        />
-
-        <select
-          name="unit"
-          value={form.unit}
-          onChange={handleChange}
-          style={{ ...S.input, gridColumn: "span 1" }}
-        >
-          {unitOptions.map((u) => (
-            <option key={u} value={u}>
-              {u}
-            </option>
-          ))}
-        </select>
-
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            gridColumn: "span 3",
-            fontSize: 14,
-          }}
-        >
-          <input
-            type="checkbox"
-            name="multiEnabled"
-            checked={form.multiEnabled}
-            onChange={handleChange}
-          />
-          Multi-buy deal? (e.g., 2 for $5)
-        </label>
-
-        {form.multiEnabled ? (
-          <>
-            <input
-              name="multiQty"
-              value={form.multiQty}
-              onChange={handleChange}
-              placeholder="Qty (e.g., 2)"
-              style={{ ...S.input, gridColumn: "span 1" }}
-            />
-            <input
-              name="multiTotal"
-              value={form.multiTotal}
-              onChange={handleChange}
-              placeholder="Bundle total (e.g., 5.00)"
-              style={{ ...S.input, gridColumn: "span 2" }}
-            />
-            {Number(form.multiQty) > 0 && Number(form.multiTotal) > 0 ? (
-              <div
-                style={{
-                  alignSelf: "center",
-                  fontSize: 12,
-                  color: "#6b7280",
-                  gridColumn: "span 2",
-                }}
-              >
-                ≈ {(Number(form.multiTotal) / Number(form.multiQty)).toFixed(2)} per
-                unit
-              </div>
-            ) : (
-              <div style={{ gridColumn: "span 2" }} />
-            )}
-          </>
-        ) : (
-          <input
-            name="price"
-            value={form.price}
-            onChange={handleChange}
-            placeholder="Price (e.g., 4.99)"
-            style={{ ...S.input, gridColumn: "span 1" }}
-          />
-        )}
-
-        {/* Caption */}
-        <textarea
-          name="caption"
-          value={form.caption}
-          onChange={handleChange}
-          placeholder="Add a caption or notes (optional)…"
-          style={{ ...S.input, gridColumn: "1 / -1", minHeight: 72, resize: "vertical" }}
-        />
-
-        {/* Photo uploader */}
-        <div style={{ gridColumn: "1 / -1" }}>
-          <MediaUploader onUploaded={setMedia} defaultPreview={media?.url || ""} />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-        <button
-          type="button"
-          onClick={() => {
-            setForm({
-              type:
-                forcedType === "grocery" || forcedType === "gas"
-                  ? forcedType
-                  : "grocery",
-              item: "",
-              store: "",
-              station: "",
-              location: "",
-              price: "",
-              unit: forcedType === "gas" ? "/L" : "/ea",
-              multiEnabled: false,
-              multiQty: "",
-              multiTotal: "",
-              caption: "",
-            });
-            setMedia(null);
-          }}
-          style={{ ...BTN.base, ...BTN.neutral }}
-        >
-          Reset
-        </button>
-
-        <button type="submit" style={{ ...BTN.base, ...BTN.primary }}>Add</button>
-      </div>
-    </form>
-  );
-}
-
 /* -------------------------------- App ------------------------------- */
 export default function App() {
-  // persist deals to localStorage (cheap cache)
+  // local cache
   const [deals, setDeals] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("kart-deals") || "[]");
@@ -677,17 +258,25 @@ export default function App() {
     } catch {}
   }, [deals]);
 
+  const [liveError, setLiveError] = useState("");
+
   const dealsCol = collection(db, "deals");
 
-  // If you want deterministic IDs instead, replace with: return upsertDeal(deal);
+  // create/update/delete helpers
   async function createDeal(deal) {
-    const ref = await addDoc(dealsCol, {
-      ...deal,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    await getDoc(ref);
-    return ref.id;
+    try {
+      const ref = await addDoc(dealsCol, {
+        ...deal,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await getDoc(ref); // force server timestamp to resolve
+      console.log("Added deal id:", ref.id);
+      return ref.id;
+    } catch (e) {
+      console.error("createDeal error:", e);
+      throw e;
+    }
   }
   async function updateDealFS(id, updates) {
     await updateDoc(doc(dealsCol, id), { ...updates, updatedAt: serverTimestamp() });
@@ -696,8 +285,9 @@ export default function App() {
     await deleteDoc(doc(dealsCol, id));
   }
 
-  // live subscription
+  // live subscription (keeps your original sort: newest)
   useEffect(() => {
+    console.log("Firestore projectId:", db?.app?.options?.projectId);
     const qy = query(dealsCol, orderBy("updatedAt", "desc"));
     const unsub = onSnapshot(
       qy,
@@ -726,13 +316,25 @@ export default function App() {
           };
         });
         setDeals(list);
+        setLiveError("");
       },
-      (err) => console.error("onSnapshot error:", err)
+      async (err) => {
+        console.error("onSnapshot error:", err);
+        setLiveError(err?.message || "Live updates failed");
+        // Fallback one-shot read so UI still shows something
+        try {
+          const ss = await getDocs(qy);
+          const list = ss.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setDeals(list);
+        } catch (e) {
+          console.error("getDocs fallback failed:", e);
+        }
+      }
     );
     return () => unsub();
   }, []);
 
-  // search/sort/filter
+  // search/sort/filter (unchanged)
   const [queryText, setQueryText] = useState(() => localStorage.getItem("kart-query") || "");
   const [sortBy, setSortBy] = useState(() => localStorage.getItem("kart-sortby") || "newest");
   const [typeFilter, setTypeFilter] = useState(() => localStorage.getItem("kart-typeFilter") || "all");
@@ -740,7 +342,7 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("kart-sortby", sortBy); } catch {} }, [sortBy]);
   useEffect(() => { try { localStorage.setItem("kart-typeFilter", typeFilter); } catch {} }, [typeFilter]);
 
-  // inline edit
+  // inline edit (unchanged)
   const [editingId, setEditingId] = useState(null);
   const [editItem, setEditItem] = useState("");
   const [editStore, setEditStore] = useState("");
@@ -750,11 +352,11 @@ export default function App() {
   const [editUnit, setEditUnit] = useState("/ea");
   const [editCaption, setEditCaption] = useState("");
 
-  // ocr prefill stub (wire later)
+  // OCR stub
   const [ocrDraft, setOcrDraft] = useState(null);
 
   async function handleAdd(newDeal) {
-    await createDeal(newDeal);
+    await createDeal(newDeal); // AddDealForm handles its own "saving" state
   }
   async function handleDelete(id) {
     await removeDeal(id);
@@ -965,7 +567,8 @@ export default function App() {
         </div>
       </div>
 
-      <AddDealForm onAdd={handleAdd} forcedType={forcedType} prefill={null /* wire OCR later */} />
+      {/* Restored external AddDealForm */}
+      <AddDealForm onAdd={handleAdd} forcedType={forcedType} prefill={null} />
 
       <DealsList
         deals={filtered}
@@ -996,10 +599,11 @@ export default function App() {
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Smart Assist – OCR</h2>
         <OCRScan onSuggest={setOcrDraft} />
       </div>
+      {/* Debug / Database Health Check */}
+      <div style={{ marginTop: "20px" }}>
+     
+      </div>
       <ToastHost/>
     </div>
   );
 } 
-
-
-
